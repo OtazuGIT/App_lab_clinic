@@ -53,11 +53,16 @@ class LabDB:
                 created_by INTEGER,
                 observations TEXT,
                 requested_by TEXT,
+                diagnosis TEXT,
+                age_years INTEGER,
                 completed INTEGER DEFAULT 0,
                 FOREIGN KEY(patient_id) REFERENCES patients(id),
                 FOREIGN KEY(created_by) REFERENCES users(id)
             )
         """)
+        # Asegurarse de que columnas nuevas existan para bases de datos creadas anteriormente
+        self._ensure_column_exists("orders", "diagnosis", "TEXT", default_value="")
+        self._ensure_column_exists("orders", "age_years", "INTEGER")
         self.cur.execute("""
             CREATE TABLE IF NOT EXISTS order_tests (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -172,11 +177,19 @@ class LabDB:
             """, (doc_type, doc_number, first_name, last_name, birth_date, sex, origin, hcl, height, weight, blood_pressure))
             self.conn.commit()
             return self.cur.lastrowid
-    def add_order_with_tests(self, patient_id, test_names, user_id, observations="", requested_by=""):
+    def add_order_with_tests(self, patient_id, test_names, user_id, observations="", requested_by="", diagnosis="", age_years=None):
         import datetime
         date_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        self.cur.execute("INSERT INTO orders(patient_id, date, created_by, observations, requested_by, completed) VALUES (?,?,?,?,?,?)",
-                         (patient_id, date_str, user_id, observations, requested_by, 0))
+        age_value = None
+        if age_years is not None:
+            try:
+                age_value = int(age_years)
+            except (TypeError, ValueError):
+                age_value = None
+        self.cur.execute("""
+            INSERT INTO orders(patient_id, date, created_by, observations, requested_by, diagnosis, age_years, completed)
+            VALUES (?,?,?,?,?,?,?,?)
+        """, (patient_id, date_str, user_id, observations, requested_by, diagnosis, age_value, 0))
         order_id = self.cur.lastrowid
         for name in test_names:
             if name in self.test_map:
@@ -186,15 +199,27 @@ class LabDB:
         self.conn.commit()
         return order_id
     def get_pending_orders(self):
-        self.cur.execute("SELECT o.id, p.first_name, p.last_name, o.date FROM orders o JOIN patients p ON o.patient_id=p.id WHERE o.completed=0")
+        self.cur.execute("""
+            SELECT o.id, p.first_name, p.last_name, o.date
+            FROM orders o
+            JOIN patients p ON o.patient_id=p.id
+            WHERE o.completed=0
+            ORDER BY o.date DESC, o.id DESC
+        """)
         return self.cur.fetchall()
     def get_completed_orders(self):
-        self.cur.execute("SELECT o.id, p.first_name, p.last_name, o.date FROM orders o JOIN patients p ON o.patient_id=p.id WHERE o.completed=1")
+        self.cur.execute("""
+            SELECT o.id, p.first_name, p.last_name, o.date
+            FROM orders o
+            JOIN patients p ON o.patient_id=p.id
+            WHERE o.completed=1
+            ORDER BY o.date DESC, o.id DESC
+        """)
         return self.cur.fetchall()
     def get_order_details(self, order_id):
         self.cur.execute("""
             SELECT p.first_name, p.last_name, p.doc_type, p.doc_number, p.birth_date, p.sex, p.origin, p.hcl,
-                   o.date, o.observations, o.requested_by,
+                   o.date, o.observations, o.requested_by, o.diagnosis, o.age_years,
                    t.name, ot.result
             FROM orders o
             JOIN patients p ON o.patient_id = p.id
@@ -205,7 +230,7 @@ class LabDB:
         rows = self.cur.fetchall()
         if not rows:
             return None
-        first_name, last_name, doc_type, doc_number, birth_date, sex, origin, hcl, date, obs, req_by, _, _ = rows[0]
+        first_name, last_name, doc_type, doc_number, birth_date, sex, origin, hcl, date, obs, req_by, diag, age_years, _, _ = rows[0]
         patient_info = {
             "name": f"{first_name} {last_name}",
             "doc_type": doc_type,
@@ -215,8 +240,8 @@ class LabDB:
             "origin": origin,
             "hcl": hcl
         }
-        order_info = {"date": date, "observations": obs, "requested_by": req_by}
-        results = [(row[11], row[12]) for row in rows]
+        order_info = {"date": date, "observations": obs, "requested_by": req_by, "diagnosis": diag, "age_years": age_years}
+        results = [(row[12], row[13]) for row in rows]
         return {"patient": patient_info, "order": order_info, "results": results}
     def save_results(self, order_id, results_dict):
         for name, result in results_dict.items():
@@ -240,3 +265,15 @@ class LabDB:
         """)
         stats["by_category"] = self.cur.fetchall()
         return stats
+    def get_distinct_requesters(self):
+        self.cur.execute("SELECT DISTINCT requested_by FROM orders WHERE requested_by IS NOT NULL AND requested_by<>'' ORDER BY requested_by")
+        return [row[0] for row in self.cur.fetchall() if row[0]]
+    def _ensure_column_exists(self, table_name, column_name, column_type, default_value=None):
+        self.cur.execute(f"PRAGMA table_info({table_name})")
+        columns = [info[1] for info in self.cur.fetchall()]
+        if column_name not in columns:
+            alter_sql = f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}"
+            if default_value is not None:
+                alter_sql += f" DEFAULT '{default_value}'"
+            self.cur.execute(alter_sql)
+            self.conn.commit()
