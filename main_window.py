@@ -1,4 +1,7 @@
 # main_window.py
+import copy
+import datetime
+import json
 import os
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout,
                              QStackedWidget, QFormLayout, QScrollArea, QGroupBox, QComboBox,
@@ -8,6 +11,279 @@ from PyQt5.QtCore import QDate, QDateTime, Qt, QTimer
 from fpdf import FPDF  # Asegúrese de tener fpdf instalado (pip install fpdf)
 
 LAB_TITLE = "Laboratorio P.S. Iñapari - 002789"
+
+# Definiciones de plantillas de resultados estructurados por examen
+HEMOGRAM_BASE_FIELDS = [
+    {
+        "key": "hematocrito",
+        "label": "Hematocrito (Hto)",
+        "unit": "%",
+        "reference": "H: 40-54 / M: 37-47",
+        "placeholder": "Ej. 42.5"
+    },
+    {
+        "key": "hemoglobina",
+        "label": "Hemoglobina (Hb)",
+        "unit": "g/dL",
+        "reference": "H: 13.5-17.5 / M: 12.0-16.0",
+        "placeholder": "Ej. 14.1"
+    },
+    {
+        "key": "leucocitos",
+        "label": "Leucocitos",
+        "unit": "/µL",
+        "reference": "4 500 - 11 000",
+        "placeholder": "Ej. 7 500"
+    },
+    {
+        "key": "eritrocitos",
+        "label": "Recuento de hematíes (RBC)",
+        "unit": "millones/µL",
+        "reference": "H: 4.5-6.0 / M: 4.0-5.4",
+        "placeholder": "Ej. 4.8"
+    },
+    {
+        "key": "plaquetas",
+        "label": "Plaquetas",
+        "unit": "/µL",
+        "reference": "150 000 - 400 000",
+        "placeholder": "Ej. 250 000"
+    },
+    {
+        "key": "segmentados",
+        "label": "Segmentados",
+        "unit": "%",
+        "reference": "40 - 75"
+    },
+    {
+        "key": "abastonados",
+        "label": "Abastonados",
+        "unit": "%",
+        "reference": "0 - 6",
+        "optional": True
+    },
+    {
+        "key": "linfocitos",
+        "label": "Linfocitos",
+        "unit": "%",
+        "reference": "20 - 45"
+    },
+    {
+        "key": "monocitos",
+        "label": "Monocitos",
+        "unit": "%",
+        "reference": "2 - 10"
+    },
+    {
+        "key": "eosinofilos",
+        "label": "Eosinófilos",
+        "unit": "%",
+        "reference": "0 - 6"
+    },
+    {
+        "key": "basofilos",
+        "label": "Basófilos",
+        "unit": "%",
+        "reference": "0 - 2",
+        "optional": True
+    },
+    {
+        "key": "mielocitos",
+        "label": "Mielocitos",
+        "unit": "%",
+        "optional": True
+    },
+    {
+        "key": "metamielocitos",
+        "label": "Metamielocitos",
+        "unit": "%",
+        "optional": True
+    },
+    {
+        "key": "otras_celulas",
+        "label": "Otras anormalidades",
+        "optional": True,
+        "placeholder": "Ej. Células en banda"
+    },
+    {
+        "key": "observaciones",
+        "label": "Observaciones microscópicas",
+        "type": "text_area",
+        "optional": True,
+        "placeholder": "Describe hallazgos morfológicos"
+    }
+]
+
+URINE_BASE_FIELDS = [
+    {"type": "section", "label": "Examen físico"},
+    {"key": "color", "label": "Color", "reference": "Amarillo claro"},
+    {"key": "aspecto", "label": "Aspecto", "reference": "Transparente"},
+    {"key": "olor", "label": "Olor", "optional": True},
+    {"type": "section", "label": "Examen químico"},
+    {"key": "densidad", "label": "Densidad", "reference": "1.005 - 1.030"},
+    {"key": "ph", "label": "pH", "reference": "5.0 - 7.5"},
+    {"key": "urobilinogeno", "label": "Urobilinógeno", "reference": "Normal"},
+    {"key": "bilirrubina", "label": "Bilirrubina", "reference": "Negativo"},
+    {"key": "proteinas", "label": "Proteínas", "reference": "Negativo"},
+    {"key": "nitritos", "label": "Nitritos", "reference": "Negativo"},
+    {"key": "glucosa", "label": "Glucosa", "reference": "Negativo"},
+    {"key": "cetonas", "label": "Cetonas", "reference": "Negativo"},
+    {"key": "leucocitos_quimico", "label": "Leucocitos", "reference": "Negativo"},
+    {"key": "acido_ascorbico", "label": "Ácido ascórbico", "reference": "Negativo", "optional": True},
+    {"key": "sangre", "label": "Sangre", "reference": "Negativo"},
+    {"type": "section", "label": "Sedimento urinario"},
+    {"key": "celulas_epiteliales", "label": "Células epiteliales/c", "reference": "Escasas"},
+    {"key": "leucocitos_campo", "label": "Leucocitos/c", "reference": "0 - 5 /campo"},
+    {"key": "hematies_campo", "label": "Hematíes/c", "reference": "0 - 2 /campo"},
+    {"key": "cristales", "label": "Cristales/c", "reference": "No se observan", "optional": True},
+    {"key": "cilindros", "label": "Cilindros/c", "reference": "No se observan"},
+    {"key": "otros_hallazgos", "label": "Otros hallazgos", "type": "text_area", "optional": True}
+]
+
+COPRO_DIRECT_FIELDS = [
+    {"type": "section", "label": "Evaluación macroscópica"},
+    {"key": "consistencia", "label": "Consistencia", "reference": "Formada / Semiformada / Líquida"},
+    {"key": "color", "label": "Color", "optional": True},
+    {"key": "moco", "label": "Moco", "type": "choice", "choices": ["Ausente", "Escaso", "Moderado", "Abundante"]},
+    {"type": "section", "label": "Evaluación microscópica"},
+    {"key": "leucocitos", "label": "Leucocitos/c", "reference": "0 - 2 /campo"},
+    {"key": "hematies", "label": "Hematíes/c", "reference": "0 - 1 /campo"},
+    {"key": "parasitos", "label": "Parásitos observados", "type": "text_area", "optional": True},
+    {"key": "levaduras", "label": "Levaduras", "optional": True},
+    {"key": "grasas", "label": "Grasas", "optional": True},
+    {"key": "reaccion_inflamatoria", "label": "Reacción inflamatoria", "optional": True, "helper": "Describa tinción Wright / diferenciación PMN-MMN"},
+    {"key": "metodo", "label": "Método", "type": "choice", "choices": ["Directo", "Concentrado", "Serial"]},
+    {"key": "observaciones", "label": "Observaciones", "type": "text_area", "optional": True}
+]
+
+COPRO_CONCENT_FIELDS = [
+    {"type": "section", "label": "Procedimiento"},
+    {"key": "metodo", "label": "Método", "type": "choice", "choices": ["Concentración", "Flotación", "Sedimentación"], "reference": "Indique técnica aplicada"},
+    {"type": "section", "label": "Hallazgos"},
+    {"key": "parasitos", "label": "Parásitos observados", "type": "text_area", "optional": True},
+    {"key": "quistes", "label": "Quistes / huevos", "optional": True},
+    {"key": "observaciones", "label": "Observaciones", "type": "text_area", "optional": True}
+]
+
+GRAM_FIELDS = [
+    {"type": "section", "label": "Examen directo"},
+    {"key": "directo_celulas", "label": "Células/c", "optional": True},
+    {"key": "directo_leucocitos", "label": "Leucocitos/c", "reference": "0 - 10 /campo"},
+    {"key": "directo_hematies", "label": "Hematíes/c", "optional": True},
+    {"key": "directo_germenes", "label": "Gérmenes", "optional": True},
+    {"type": "section", "label": "Coloración de Gram"},
+    {"key": "gram_celulas", "label": "Células/c", "optional": True},
+    {"key": "gram_leucocitos", "label": "Leucocitos/c", "reference": "0 - 10 /campo"},
+    {"key": "gram_bacilos_doderlein", "label": "Bacilos de Döderlein", "reference": "Abundantes"},
+    {"key": "gram_bacterias", "label": "Bacterias", "optional": True},
+    {"key": "gram_celulas_clue", "label": "Células clue", "optional": True},
+    {"key": "observaciones", "label": "Observaciones", "type": "text_area", "optional": True}
+]
+
+REACTION_FIELDS = [
+    {"key": "leucocitos_pmn", "label": "Leucocitos PMN/c", "reference": "0 - 1 /campo"},
+    {"key": "leucocitos_mmn", "label": "Leucocitos MMN/c", "reference": "0 - 1 /campo"},
+    {"key": "moco", "label": "Moco", "type": "choice", "choices": ["Ausente", "Escaso", "Moderado", "Abundante"], "optional": True},
+    {"key": "observaciones", "label": "Observaciones", "type": "text_area", "optional": True}
+]
+
+SEDIMENTO_FIELDS = [
+    {"key": "celulas_epiteliales", "label": "Células epiteliales/c", "reference": "Escasas"},
+    {"key": "leucocitos_campo", "label": "Leucocitos/c", "reference": "0 - 5 /campo"},
+    {"key": "hematies_campo", "label": "Hematíes/c", "reference": "0 - 2 /campo"},
+    {"key": "bacterias", "label": "Bacterias", "optional": True},
+    {"key": "cristales", "label": "Cristales", "optional": True},
+    {"key": "cilindros", "label": "Cilindros", "optional": True},
+    {"key": "otros_hallazgos", "label": "Otros hallazgos", "type": "text_area", "optional": True}
+]
+
+TEST_TEMPLATES = {
+    "Hemograma manual": {
+        "fields": copy.deepcopy(HEMOGRAM_BASE_FIELDS),
+        "auto_calculations": [
+            {
+                "source": "hematocrito",
+                "target": "hemoglobina",
+                "operation": "divide",
+                "operand": 3.03,
+                "decimals": 2,
+                "description": "Hb = Hto / 3.03 (cálculo automático)",
+            }
+        ]
+    },
+    "Hemograma automatizado": {
+        "fields": copy.deepcopy(HEMOGRAM_BASE_FIELDS),
+        "auto_calculations": [
+            {
+                "source": "hematocrito",
+                "target": "hemoglobina",
+                "operation": "divide",
+                "operand": 3.03,
+                "decimals": 2,
+                "description": "Hb = Hto / 3.03 (cálculo automático)",
+            }
+        ]
+    },
+    "Examen completo de orina": {
+        "fields": copy.deepcopy(URINE_BASE_FIELDS)
+    },
+    "Sedimento urinario": {
+        "fields": copy.deepcopy(SEDIMENTO_FIELDS)
+    },
+    "Examen coprológico (directo)": {
+        "fields": copy.deepcopy(COPRO_DIRECT_FIELDS)
+    },
+    "Examen coprológico (concentración)": {
+        "fields": copy.deepcopy(COPRO_CONCENT_FIELDS)
+    },
+    "Coloración de Gram": {
+        "fields": copy.deepcopy(GRAM_FIELDS)
+    },
+    "Reacción inflamatoria": {
+        "fields": copy.deepcopy(REACTION_FIELDS)
+    },
+    "Test de aminas": {
+        "fields": [
+            {
+                "key": "resultado",
+                "label": "Resultado",
+                "type": "bool",
+                "positive_text": "Positivo",
+                "negative_text": "Negativo",
+                "reference": "Negativo"
+            },
+            {
+                "key": "olor_caracteristico",
+                "label": "Olor característico",
+                "optional": True
+            },
+            {
+                "key": "observaciones",
+                "label": "Observaciones",
+                "type": "text_area",
+                "optional": True
+            }
+        ]
+    },
+    "Test de Helecho": {
+        "fields": [
+            {
+                "key": "resultado",
+                "label": "Resultado",
+                "type": "bool",
+                "positive_text": "Positivo",
+                "negative_text": "Negativo",
+                "reference": "Patrón negativo"
+            },
+            {
+                "key": "observaciones",
+                "label": "Observaciones",
+                "type": "text_area",
+                "optional": True
+            }
+        ]
+    }
+}
 class MainWindow(QMainWindow):
     def __init__(self, labdb, user):
         super().__init__()
@@ -84,9 +360,11 @@ class MainWindow(QMainWindow):
         # Actualizar datos dinámicos al cambiar de página
         self.stack.currentChanged.connect(self.on_page_changed)
         # Variables auxiliares
-        self.order_fields = {}        # Campos de resultado dinámicos (nombre_prueba -> QLineEdit)
+        self.order_fields = {}        # Campos de resultado dinámicos por examen
         self.selected_order_id = None # Orden seleccionada actualmente en resultados
         self.last_order_registered = None  # Última orden registrada (para enlace rápido a resultados)
+        self.pending_orders_cache = []    # Lista cacheada de órdenes pendientes para facilitar filtros
+        self.completed_orders_cache = []  # Lista cacheada de órdenes completadas
         # Reloj en tiempo real para la ventana principal
         self._clock_timer = QTimer(self)
         self._clock_timer.timeout.connect(self._update_clock)
@@ -404,78 +682,609 @@ class MainWindow(QMainWindow):
             self.stack.setCurrentWidget(self.page_resultados)
             self.populate_pending_orders()
             # Seleccionar automáticamente la orden recién creada en el combo
-            for i in range(self.combo_orders.count()):
-                if self.combo_orders.itemData(i) == self.last_order_registered:
-                    self.combo_orders.setCurrentIndex(i); break
+            self._select_order_in_combo(self.combo_orders, self.last_order_registered)
             self.load_order_fields()
     def init_resultados_page(self):
         layout = QVBoxLayout(self.page_resultados)
+        search_layout = QHBoxLayout()
+        search_label = QLabel("Buscar:")
+        self.order_search_input = QLineEdit()
+        self.order_search_input.setPlaceholderText("Nombre, documento o # de orden")
+        search_layout.addWidget(search_label)
+        search_layout.addWidget(self.order_search_input, 1)
+        sort_label = QLabel("Ordenar:")
+        self.pending_sort_combo = QComboBox()
+        self.pending_sort_combo.addItems([
+            "Fecha (recientes primero)",
+            "Fecha (antiguas primero)",
+            "Número de orden (descendente)",
+            "Número de orden (ascendente)"
+        ])
+        search_layout.addWidget(sort_label)
+        search_layout.addWidget(self.pending_sort_combo)
+        search_layout.addStretch()
+        layout.addLayout(search_layout)
         top_layout = QHBoxLayout()
         lbl = QLabel("Orden pendiente:")
         self.combo_orders = QComboBox()
+        self.combo_orders.setMinimumWidth(350)
         btn_load = QPushButton("Cargar")
-        top_layout.addWidget(lbl); top_layout.addWidget(self.combo_orders); top_layout.addWidget(btn_load)
+        top_layout.addWidget(lbl)
+        top_layout.addWidget(self.combo_orders)
+        top_layout.addWidget(btn_load)
         layout.addLayout(top_layout)
         # Área scrollable para campos de resultados
-        self.results_area = QScrollArea(); self.results_area.setWidgetResizable(True)
-        self.results_container = QWidget(); self.results_layout = QFormLayout(self.results_container)
+        self.results_area = QScrollArea()
+        self.results_area.setWidgetResizable(True)
+        self.results_container = QWidget()
+        self.results_layout = QVBoxLayout(self.results_container)
+        self.results_layout.setContentsMargins(10, 10, 10, 10)
+        self.results_layout.setSpacing(14)
         self.results_area.setWidget(self.results_container)
         layout.addWidget(self.results_area)
         btn_save = QPushButton("Guardar Resultados")
         layout.addWidget(btn_save)
         btn_load.clicked.connect(self.load_order_fields)
         btn_save.clicked.connect(self.save_results)
+        self.order_search_input.textChanged.connect(self.filter_pending_orders)
+        self.pending_sort_combo.currentIndexChanged.connect(
+            lambda: self.filter_pending_orders(self.order_search_input.text(), prefer_order=self.selected_order_id)
+        )
     def populate_pending_orders(self):
         # Llenar combo de órdenes pendientes (no completadas)
-        self.combo_orders.clear()
         pending = self.labdb.get_pending_orders()
-        for (oid, first, last, date) in pending:
-            self.combo_orders.addItem(f"{first} {last} - {date}", oid)
-        if not pending:
+        self.pending_orders_cache = []
+        for row in pending:
+            oid, first, last, date, doc_type, doc_number = row
+            self.pending_orders_cache.append({
+                "id": oid,
+                "first_name": first,
+                "last_name": last,
+                "date": date,
+                "doc_type": doc_type or "",
+                "doc_number": doc_number or ""
+            })
+        search_text = self.order_search_input.text() if hasattr(self, 'order_search_input') else ""
+        prefer_id = self.selected_order_id or self.last_order_registered
+        self.filter_pending_orders(search_text, prefer_order=prefer_id)
+    def filter_pending_orders(self, text="", prefer_order=None):
+        if not hasattr(self, 'combo_orders'):
+            return
+        filter_text = (text or "").strip().lower()
+        current_data = self.combo_orders.currentData()
+        self.combo_orders.blockSignals(True)
+        self.combo_orders.clear()
+        orders = getattr(self, 'pending_orders_cache', [])
+        filtered_orders = []
+        for order in orders:
+            search_blob = " ".join([
+                str(order['id']),
+                order['first_name'] or "",
+                order['last_name'] or "",
+                order['doc_type'] or "",
+                order['doc_number'] or "",
+                order['date'] or ""
+            ]).lower()
+            if filter_text in search_blob:
+                filtered_orders.append(order)
+        sort_mode = self.pending_sort_combo.currentIndex() if hasattr(self, 'pending_sort_combo') else 0
+        sorted_orders = self._sort_orders(filtered_orders, sort_mode)
+        matching_ids = [order['id'] for order in sorted_orders]
+        for order in sorted_orders:
+            display = self._format_order_display(order)
+            self.combo_orders.addItem(display, order['id'])
+        if not matching_ids:
             self.combo_orders.addItem("(No hay órdenes pendientes)", None)
+        self.combo_orders.blockSignals(False)
+        target_candidates = [
+            prefer_order,
+            current_data,
+            self.selected_order_id,
+            self.last_order_registered
+        ]
+        selected = None
+        for candidate in target_candidates:
+            if candidate is not None and candidate in matching_ids:
+                selected = candidate
+                break
+        if selected is not None:
+            self._select_order_in_combo(self.combo_orders, selected)
+        else:
+            self.combo_orders.setCurrentIndex(0)
+    def _format_order_display(self, order):
+        doc_type = order.get('doc_type') or ""
+        doc_number = order.get('doc_number') or ""
+        doc_text = f" ({doc_type} {doc_number})" if doc_type and doc_number else ""
+        return f"Orden #{order['id']} | {order['date']} | {order['first_name']} {order['last_name']}{doc_text}"
+    def _select_order_in_combo(self, combo, order_id):
+        for idx in range(combo.count()):
+            if combo.itemData(idx) == order_id:
+                combo.setCurrentIndex(idx)
+                return
+
+    def _parse_order_datetime(self, order):
+        date_str = order.get('date') if isinstance(order, dict) else None
+        if not date_str:
+            return datetime.datetime.min
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+            try:
+                return datetime.datetime.strptime(date_str, fmt)
+            except (ValueError, TypeError):
+                continue
+        return datetime.datetime.min
+
+    def _sort_orders(self, orders, sort_mode):
+        if not orders:
+            return []
+        if sort_mode == 0:  # Fecha descendente (recientes primero)
+            return sorted(
+                orders,
+                key=lambda o: (self._parse_order_datetime(o), o.get('id', 0)),
+                reverse=True
+            )
+        if sort_mode == 1:  # Fecha ascendente (antiguas primero)
+            return sorted(
+                orders,
+                key=lambda o: (self._parse_order_datetime(o), o.get('id', 0))
+            )
+        if sort_mode == 2:  # Número de orden descendente
+            return sorted(orders, key=lambda o: o.get('id', 0), reverse=True)
+        # Número de orden ascendente (predeterminado restante)
+        return sorted(orders, key=lambda o: o.get('id', 0))
+
+    def _refresh_completed_combo(self, prefer_order=None):
+        if not hasattr(self, 'combo_completed'):
+            return
+        current_data = self.combo_completed.currentData()
+        orders = getattr(self, 'completed_orders_cache', [])
+        sort_mode = self.completed_sort_combo.currentIndex() if hasattr(self, 'completed_sort_combo') else 0
+        sorted_orders = self._sort_orders(orders, sort_mode)
+        self.combo_completed.blockSignals(True)
+        self.combo_completed.clear()
+        if not sorted_orders:
+            self.combo_completed.addItem("(No hay resultados)", None)
+            self.combo_completed.blockSignals(False)
+            self.combo_completed.setCurrentIndex(0)
+            return
+        for order in sorted_orders:
+            self.combo_completed.addItem(self._format_order_display(order), order['id'])
+        def normalize_candidate(candidate):
+            try:
+                return int(candidate)
+            except (TypeError, ValueError):
+                return None
+        normalized_prefer = normalize_candidate(prefer_order)
+        normalized_current = normalize_candidate(current_data)
+        available_ids = {order['id'] for order in sorted_orders}
+        target_candidates = [normalized_prefer, normalized_current]
+        selected = None
+        for candidate in target_candidates:
+            if candidate is not None and candidate in available_ids:
+                selected = candidate
+                break
+        if selected is not None:
+            self._select_order_in_combo(self.combo_completed, selected)
+        else:
+            self.combo_completed.setCurrentIndex(0)
+        self.combo_completed.blockSignals(False)
     def load_order_fields(self):
         # Cargar campos de resultado para la orden seleccionada
-        while self.results_layout.rowCount():
-            self.results_layout.removeRow(0)  # eliminar filas anteriores
+        self._clear_results_layout()
         self.order_fields.clear()
-        data = self.combo_orders.currentData()
+        data = self.combo_orders.currentData() if hasattr(self, 'combo_orders') else None
         if data is None:
+            self.selected_order_id = None
+            placeholder = QLabel("Seleccione una orden pendiente para registrar resultados.")
+            placeholder.setStyleSheet("color: #555; font-style: italic;")
+            placeholder.setWordWrap(True)
+            self.results_layout.addWidget(placeholder)
+            self.results_layout.addStretch()
             return
-        order_id = int(data); self.selected_order_id = order_id
+        order_id = int(data)
+        self.selected_order_id = order_id
         # Consultar pruebas de esa orden
         self.labdb.cur.execute("""
             SELECT t.name, ot.result FROM order_tests ot JOIN tests t ON ot.test_id = t.id WHERE ot.order_id=?
         """, (order_id,))
-        for name, result in self.labdb.cur.fetchall():
-            lbl = QLabel(name + ":"); edit = QLineEdit()
-            edit.setText(result if result else "")
-            self.results_layout.addRow(lbl, edit)
-            self.order_fields[name] = edit
+        rows = self.labdb.cur.fetchall()
+        if not rows:
+            empty_label = QLabel("La orden seleccionada no tiene pruebas asociadas.")
+            empty_label.setStyleSheet("color: #555; font-style: italic;")
+            empty_label.setWordWrap(True)
+            self.results_layout.addWidget(empty_label)
+            self.results_layout.addStretch()
+            return
+        for test_name, raw_result in rows:
+            template = TEST_TEMPLATES.get(test_name)
+            group_box = QGroupBox(test_name)
+            group_box.setStyleSheet("QGroupBox { font-weight: bold; }")
+            group_layout = QFormLayout()
+            group_layout.setLabelAlignment(Qt.AlignLeft)
+            group_box.setLayout(group_layout)
+            parsed = self._parse_stored_result(raw_result)
+            existing_values = {}
+            if parsed.get("type") == "structured":
+                existing_values = parsed.get("values", {})
+            field_entries = {}
+            if template:
+                for field_def in template.get("fields", []):
+                    if field_def.get("type") == "section":
+                        section_label = QLabel(field_def.get("label", ""))
+                        section_label.setStyleSheet("font-weight: bold; color: #2c3e50; padding-top:4px;")
+                        group_layout.addRow(section_label)
+                        continue
+                    label_text, field_widget, widget_info = self._create_structured_field(field_def, existing_values)
+                    widget_info["definition"] = field_def
+                    key = field_def.get("key")
+                    if key:
+                        field_entries[key] = widget_info
+                    group_layout.addRow(f"{label_text}:", field_widget)
+                self._apply_auto_calculations(field_entries, template)
+                self.order_fields[test_name] = {
+                    "template": template,
+                    "template_name": test_name,
+                    "fields": field_entries
+                }
+            else:
+                default_value = ""
+                if parsed.get("type") == "text":
+                    default_value = parsed.get("value", "")
+                elif parsed.get("type") == "structured":
+                    default_value = self._structured_dict_to_text(parsed.get("values", {}))
+                edit = QLineEdit()
+                edit.setText(default_value)
+                group_layout.addRow("Resultado:", edit)
+                self.order_fields[test_name] = {
+                    "template": None,
+                    "fields": {
+                        "__value__": {
+                            "type": "line",
+                            "widget": edit,
+                            "definition": {"key": "__value__", "label": "Resultado"}
+                        }
+                    }
+                }
+            self.results_layout.addWidget(group_box)
+        self.results_layout.addStretch()
     def save_results(self):
         # Guardar los resultados ingresados para la orden seleccionada
         if not self.selected_order_id:
             return
-        results_dict = {name: edit.text().strip() for name, edit in self.order_fields.items()}
-        # Si hay campos vacíos, confirmar si desea guardar incompleto
-        if any(val == "" for val in results_dict.values()):
-            reply = QMessageBox.question(self, "Confirmar", "Hay pruebas sin resultado. ¿Guardar de todos modos?", QMessageBox.Yes | QMessageBox.No)
+        results_dict = {}
+        has_empty = False
+        for test_name, info in self.order_fields.items():
+            template = info.get("template")
+            if template:
+                values = {}
+                for key, field_info in info["fields"].items():
+                    value = self._get_widget_value(field_info)
+                    values[key] = value
+                    if value == "" and not field_info["definition"].get("optional", False):
+                        has_empty = True
+                results_dict[test_name] = {
+                    "type": "structured",
+                    "template": info.get("template_name", test_name),
+                    "values": values
+                }
+            else:
+                field_info = info["fields"].get("__value__")
+                value = self._get_widget_value(field_info)
+                results_dict[test_name] = value
+                if value == "":
+                    has_empty = True
+        if has_empty:
+            reply = QMessageBox.question(
+                self,
+                "Confirmar",
+                "Hay pruebas o campos sin resultado. ¿Guardar de todos modos?",
+                QMessageBox.Yes | QMessageBox.No
+            )
             if reply == QMessageBox.No:
                 return
         completed = self.labdb.save_results(self.selected_order_id, results_dict)
         if completed:
             QMessageBox.information(self, "Completado", "Resultados guardados. Orden marcada como completada.")
-            # Actualizar lista de pendientes (esta orden se removerá)
+            self.selected_order_id = None
             self.populate_pending_orders()
+            self._clear_results_layout()
+            msg = QLabel("Seleccione otra orden pendiente para continuar con la digitación de resultados.")
+            msg.setStyleSheet("color: #555; font-style: italic;")
+            msg.setWordWrap(True)
+            self.results_layout.addWidget(msg)
+            self.results_layout.addStretch()
         else:
             QMessageBox.information(self, "Guardado", "Resultados guardados (orden aún incompleta).")
+            self.load_order_fields()
+    def _clear_results_layout(self):
+        if not hasattr(self, 'results_layout'):
+            return
+        while self.results_layout.count():
+            item = self.results_layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+    def _create_structured_field(self, field_def, existing_values):
+        key = field_def.get("key")
+        value = ""
+        if key:
+            value = existing_values.get(key, "")
+        container = QWidget()
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+        widget_info = {"key": key, "container": container}
+        field_type = field_def.get("type", "text")
+        if field_type == "choice":
+            combo = QComboBox()
+            combo.addItems(field_def.get("choices", []))
+            if value:
+                idx = combo.findText(value)
+                if idx >= 0:
+                    combo.setCurrentIndex(idx)
+                else:
+                    combo.addItem(value)
+                    combo.setCurrentIndex(combo.count() - 1)
+            else:
+                if combo.count():
+                    combo.setCurrentIndex(-1)
+            layout.addWidget(combo)
+            widget_info.update({"type": "combo", "widget": combo})
+        elif field_type == "bool":
+            pos_text = field_def.get("positive_text", "Positivo")
+            neg_text = field_def.get("negative_text", "Negativo")
+            pos_radio = QRadioButton(pos_text)
+            neg_radio = QRadioButton(neg_text)
+            group = QButtonGroup(container)
+            group.addButton(pos_radio)
+            group.addButton(neg_radio)
+            layout.addWidget(pos_radio)
+            layout.addWidget(neg_radio)
+            widget_info.update({
+                "type": "bool",
+                "group": group,
+                "positive": pos_radio,
+                "negative": neg_radio,
+                "positive_text": pos_text,
+                "negative_text": neg_text
+            })
+            if value:
+                if value.lower() == pos_text.lower() or value.lower() == "positivo":
+                    pos_radio.setChecked(True)
+                elif value.lower() == neg_text.lower() or value.lower() == "negativo":
+                    neg_radio.setChecked(True)
+        elif field_type == "text_area":
+            text_edit = QTextEdit()
+            text_edit.setFixedHeight(field_def.get("height", 70))
+            placeholder = field_def.get("placeholder")
+            if placeholder:
+                text_edit.setPlaceholderText(placeholder)
+            if value:
+                text_edit.setPlainText(value)
+            layout.addWidget(text_edit)
+            widget_info.update({"type": "text_area", "widget": text_edit})
+        else:
+            edit = QLineEdit()
+            placeholder = field_def.get("placeholder")
+            if placeholder:
+                edit.setPlaceholderText(placeholder)
+            if value:
+                edit.setText(value)
+            layout.addWidget(edit)
+            widget_info.update({"type": "line", "widget": edit})
+        unit = field_def.get("unit")
+        if unit and field_type not in ("bool",):
+            unit_label = QLabel(unit)
+            unit_label.setStyleSheet("color: #555; font-size: 11px;")
+            layout.addWidget(unit_label)
+        reference = field_def.get("reference")
+        if reference:
+            ref_label = QLabel(f"Ref: {reference}")
+            ref_label.setWordWrap(True)
+            ref_label.setStyleSheet("color: #777; font-size: 11px;")
+            layout.addWidget(ref_label)
+        helper = field_def.get("helper")
+        if helper:
+            helper_label = QLabel(helper)
+            helper_label.setWordWrap(True)
+            helper_label.setStyleSheet("color: #0a84ff; font-size: 10px;")
+            layout.addWidget(helper_label)
+        layout.addStretch()
+        widget_info["unit"] = unit
+        widget_info["reference"] = reference
+        return field_def.get("label", key or ""), container, widget_info
+    def _apply_auto_calculations(self, field_entries, template):
+        for calc in template.get("auto_calculations", []):
+            self._setup_auto_calculation(field_entries, calc)
+    def _setup_auto_calculation(self, field_entries, calc):
+        source_key = calc.get("source")
+        target_key = calc.get("target")
+        if not source_key or not target_key:
+            return
+        source_info = field_entries.get(source_key)
+        target_info = field_entries.get(target_key)
+        if not source_info or not target_info:
+            return
+        if source_info.get("type") not in ("line",):
+            return
+        if target_info.get("type") not in ("line",):
+            return
+        source_widget = source_info.get("widget")
+        target_widget = target_info.get("widget")
+        if not source_widget or not target_widget:
+            return
+        operation = calc.get("operation")
+        operand = calc.get("operand")
+        decimals = calc.get("decimals", 2)
+        only_if_empty = calc.get("only_if_empty", False)
+        apply_on_load = calc.get("apply_on_load", True)
+        description = calc.get("description")
+        if description and not target_info.get("has_auto_helper"):
+            container = target_info.get("container")
+            if container and container.layout():
+                helper_label = QLabel(description)
+                helper_label.setWordWrap(True)
+                helper_label.setStyleSheet("color: #0a84ff; font-size: 10px;")
+                container.layout().addWidget(helper_label)
+                target_info["has_auto_helper"] = True
+        def on_change(text):
+            value = self._to_float(text)
+            if value is None:
+                if calc.get("clear_on_invalid", False):
+                    target_widget.blockSignals(True)
+                    target_widget.clear()
+                    target_widget.blockSignals(False)
+                return
+            result = None
+            if operation == "divide":
+                if operand in (0, None):
+                    return
+                result = value / operand
+            elif operation == "multiply" and operand is not None:
+                result = value * operand
+            elif operation == "add" and operand is not None:
+                result = value + operand
+            elif operation == "subtract" and operand is not None:
+                result = value - operand
+            if result is None:
+                return
+            if only_if_empty and target_widget.text().strip():
+                return
+            if target_widget.hasFocus() and not calc.get("update_while_editing", False):
+                return
+            if decimals is not None:
+                formatted = f"{result:.{decimals}f}".rstrip('0').rstrip('.')
+            else:
+                formatted = str(result)
+            target_widget.blockSignals(True)
+            target_widget.setText(formatted)
+            target_widget.blockSignals(False)
+        source_widget.textChanged.connect(on_change)
+        if apply_on_load:
+            on_change(source_widget.text())
+    def _structured_dict_to_text(self, values):
+        if not isinstance(values, dict):
+            return ""
+        parts = []
+        for key, val in values.items():
+            if val:
+                parts.append(f"{key}: {val}")
+        return "; ".join(parts)
+    def _parse_stored_result(self, raw_result):
+        if isinstance(raw_result, dict):
+            return raw_result
+        if raw_result in (None, ""):
+            return {"type": "text", "value": ""}
+        try:
+            data = json.loads(raw_result)
+        except (TypeError, json.JSONDecodeError):
+            return {"type": "text", "value": raw_result}
+        if isinstance(data, dict) and data.get("type") == "structured":
+            return data
+        return {"type": "text", "value": raw_result if raw_result is not None else ""}
+    def _get_widget_value(self, field_info):
+        if not field_info:
+            return ""
+        field_type = field_info.get("type")
+        if field_type == "line":
+            widget = field_info.get("widget")
+            return widget.text().strip() if widget else ""
+        if field_type == "text_area":
+            widget = field_info.get("widget")
+            return widget.toPlainText().strip() if widget else ""
+        if field_type == "combo":
+            widget = field_info.get("widget")
+            return widget.currentText().strip() if widget else ""
+        if field_type == "bool":
+            if field_info.get("positive") and field_info["positive"].isChecked():
+                return field_info.get("positive_text", "Positivo")
+            if field_info.get("negative") and field_info["negative"].isChecked():
+                return field_info.get("negative_text", "Negativo")
+            return ""
+        return ""
+    def _to_float(self, text):
+        if text in (None, ""):
+            return None
+        try:
+            return float(str(text).replace(',', '.'))
+        except ValueError:
+            return None
+    def _format_result_lines(self, test_name, raw_result):
+        parsed = self._parse_stored_result(raw_result)
+        template = TEST_TEMPLATES.get(test_name)
+        if parsed.get("type") == "structured" and template:
+            values = parsed.get("values", {})
+            lines = [f"{test_name}:"]
+            for field_def in template.get("fields", []):
+                if field_def.get("type") == "section":
+                    section_label = field_def.get("label", "")
+                    if section_label:
+                        lines.append(f"  {section_label}:")
+                    continue
+                key = field_def.get("key")
+                if not key:
+                    continue
+                value = values.get(key, "")
+                if isinstance(value, str):
+                    display_value = " ".join(value.splitlines()).strip()
+                else:
+                    display_value = value
+                if display_value in (None, ""):
+                    display_value = "-"
+                unit = field_def.get("unit")
+                field_type = field_def.get("type")
+                if unit and display_value not in ("-", "") and field_type not in ("bool", "text_area", "choice"):
+                    display_text = str(display_value)
+                    if not display_text.endswith(unit):
+                        display_value = f"{display_text} {unit}"
+                reference = field_def.get("reference")
+                label = field_def.get("label", key)
+                bullet = f"  • {label}: {display_value}"
+                if reference:
+                    bullet += f" (Ref: {reference})"
+                lines.append(bullet)
+            return lines
+        text_value = parsed.get("value", raw_result or "")
+        if isinstance(text_value, str):
+            text_value = text_value.strip()
+        if text_value == "":
+            text_value = "-"
+        return [f"{test_name}: {text_value}"]
+    def _format_result_for_export(self, test_name, raw_result):
+        lines = self._format_result_lines(test_name, raw_result)
+        if len(lines) <= 1:
+            line = lines[0]
+            parts = line.split(": ", 1)
+            return parts[1] if len(parts) > 1 else line
+        cleaned = []
+        for line in lines[1:]:
+            stripped = line.strip()
+            if stripped.endswith(":") and "•" not in stripped:
+                continue
+            cleaned.append(stripped.replace("• ", ""))
+        return " | ".join(cleaned)
     def init_emitir_page(self):
         layout = QVBoxLayout(self.page_emitir)
         top_layout = QHBoxLayout()
         lbl = QLabel("Orden completada:")
         self.combo_completed = QComboBox()
         btn_view = QPushButton("Ver")
-        top_layout.addWidget(lbl); top_layout.addWidget(self.combo_completed); top_layout.addWidget(btn_view)
+        top_layout.addWidget(lbl)
+        top_layout.addWidget(self.combo_completed, 1)
+        top_layout.addWidget(btn_view)
         layout.addLayout(top_layout)
+        sort_layout = QHBoxLayout()
+        sort_layout.addStretch()
+        sort_label = QLabel("Ordenar:")
+        self.completed_sort_combo = QComboBox()
+        self.completed_sort_combo.addItems([
+            "Fecha (recientes primero)",
+            "Fecha (antiguas primero)",
+            "Número de orden (descendente)",
+            "Número de orden (ascendente)"
+        ])
+        sort_layout.addWidget(sort_label)
+        sort_layout.addWidget(self.completed_sort_combo)
+        layout.addLayout(sort_layout)
         self.output_text = QTextEdit(); self.output_text.setReadOnly(True)
         layout.addWidget(self.output_text)
         btn_pdf = QPushButton("Exportar a PDF"); btn_excel = QPushButton("Exportar a Excel")
@@ -484,14 +1293,23 @@ class MainWindow(QMainWindow):
         btn_view.clicked.connect(self.display_selected_result)
         btn_pdf.clicked.connect(self.export_pdf)
         btn_excel.clicked.connect(self.export_excel)
+        self.completed_sort_combo.currentIndexChanged.connect(lambda: self._refresh_completed_combo())
     def populate_completed_orders(self):
         # Llenar combo de órdenes completadas
-        self.combo_completed.clear()
-        completed = self.labdb.get_completed_orders()
-        for (oid, first, last, date) in completed:
-            self.combo_completed.addItem(f"{first} {last} - {date}", oid)
-        if not completed:
-            self.combo_completed.addItem("(No hay resultados)", None)
+        completed_rows = self.labdb.get_completed_orders()
+        self.completed_orders_cache = []
+        for row in completed_rows:
+            oid, first, last, date, doc_type, doc_number = row
+            order = {
+                "id": oid,
+                "first_name": first,
+                "last_name": last,
+                "date": date,
+                "doc_type": doc_type or "",
+                "doc_number": doc_number or ""
+            }
+            self.completed_orders_cache.append(order)
+        self._refresh_completed_combo()
     def display_selected_result(self):
         # Mostrar los resultados de la orden seleccionada en el cuadro de texto
         data = self.combo_completed.currentData()
@@ -502,24 +1320,27 @@ class MainWindow(QMainWindow):
         if not info:
             return
         pat = info["patient"]; ord_inf = info["order"]; results = info["results"]
-        text = (f"Paciente: {pat['name']} (Doc: {pat['doc_type']} {pat['doc_number']})\n")
+        lines = [f"Paciente: {pat['name']} (Doc: {pat['doc_type']} {pat['doc_number']})"]
         age_value = ord_inf.get('age_years')
         if age_value is None and pat['birth_date']:
             bd = QDate.fromString(pat['birth_date'], "yyyy-MM-dd")
             if bd.isValid():
                 age_value = bd.daysTo(QDate.currentDate()) // 365
         if age_value is not None:
-            text += f"Edad: {age_value} años\n"
-        text += (f"Sexo: {pat['sex']}\nProcedencia: {pat['origin']}\nHCL: {pat['hcl']}\n"
-                 f"Fecha: {ord_inf['date']}\nSolicitante: {ord_inf['requested_by']}\n")
+            lines.append(f"Edad: {age_value} años")
+        lines.append(f"Sexo: {pat['sex']}")
+        lines.append(f"Procedencia: {pat['origin']}")
+        lines.append(f"HCL: {pat['hcl']}")
+        lines.append(f"Fecha: {ord_inf['date']}")
+        lines.append(f"Solicitante: {ord_inf['requested_by']}")
         if ord_inf.get("diagnosis") and ord_inf["diagnosis"].strip():
-            text += f"Diagnóstico presuntivo: {ord_inf['diagnosis']}\n"
-        text += "Resultados:\n"
+            lines.append(f"Diagnóstico presuntivo: {ord_inf['diagnosis']}")
+        lines.append("Resultados:")
         for test_name, result in results:
-            text += f"  - {test_name}: {result}\n"
+            lines.extend(self._format_result_lines(test_name, result))
         if ord_inf["observations"]:
-            text += f"Observaciones: {ord_inf['observations']}\n"
-        self.output_text.setPlainText(text)
+            lines.append(f"Observaciones: {ord_inf['observations']}")
+        self.output_text.setPlainText("\n".join(lines))
     def export_pdf(self):
         # Exportar el resultado seleccionado a un archivo PDF
         data = self.combo_completed.currentData()
@@ -584,9 +1405,20 @@ class MainWindow(QMainWindow):
         # Resultados
         pdf.set_font("Arial", 'B', 11)
         pdf.cell(0, 6, "Resultados", ln=1)
-        pdf.set_font("Arial", '', 10)
         for test_name, result in results:
-            pdf.multi_cell(0, 6, f"{test_name}: {result}", border=0)
+            lines = self._format_result_lines(test_name, result)
+            if not lines:
+                continue
+            if len(lines) == 1:
+                pdf.set_font("Arial", '', 10)
+                pdf.multi_cell(0, 6, lines[0], border=0)
+            else:
+                pdf.set_font("Arial", 'B', 10)
+                pdf.multi_cell(0, 6, lines[0], border=0)
+                pdf.set_font("Arial", '', 10)
+                for line in lines[1:]:
+                    pdf.multi_cell(0, 6, line, border=0)
+            pdf.ln(1)
         if ord_inf['observations']:
             pdf.ln(2)
             pdf.set_font("Arial", 'I', 9)
@@ -621,11 +1453,13 @@ class MainWindow(QMainWindow):
                 f.write("Nombre,Apellidos,Documento,Prueba,Resultado,Fecha,Solicitante,Diagnostico presuntivo,Edad (años)\n")
                 for first, last, doc_type, doc_num, test_name, result, date, requester, diagnosis, age_years in rows:
                     name = first; surn = last; doc = f"{doc_type} {doc_num}"
-                    res = result; dt = date
+                    res = self._format_result_for_export(test_name, result)
+                    res = res.replace('"', "'")
+                    dt = date
                     req = requester or ""
                     diag = diagnosis or ""
                     age_txt = str(age_years) if age_years is not None else ""
-                    line = f"{name},{surn},{doc},{test_name},{res},{dt},{req},{diag},{age_txt}\n"
+                    line = f"{name},{surn},{doc},{test_name},\"{res}\",{dt},{req},{diag},{age_txt}\n"
                     f.write(line)
             QMessageBox.information(self, "Exportado", f"Datos exportados a:\n{file_path}")
         except Exception as e:

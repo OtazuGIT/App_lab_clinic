@@ -1,4 +1,5 @@
 # database.py
+import json
 import sqlite3
 class LabDB:
     def __init__(self, db_path="lab_db.sqlite"):
@@ -200,20 +201,20 @@ class LabDB:
         return order_id
     def get_pending_orders(self):
         self.cur.execute("""
-            SELECT o.id, p.first_name, p.last_name, o.date
+            SELECT o.id, p.first_name, p.last_name, o.date, p.doc_type, p.doc_number
             FROM orders o
             JOIN patients p ON o.patient_id=p.id
             WHERE o.completed=0
-            ORDER BY o.date DESC, o.id DESC
+            ORDER BY o.date ASC, o.id ASC
         """)
         return self.cur.fetchall()
     def get_completed_orders(self):
         self.cur.execute("""
-            SELECT o.id, p.first_name, p.last_name, o.date
+            SELECT o.id, p.first_name, p.last_name, o.date, p.doc_type, p.doc_number
             FROM orders o
             JOIN patients p ON o.patient_id=p.id
             WHERE o.completed=1
-            ORDER BY o.date DESC, o.id DESC
+            ORDER BY o.date ASC, o.id ASC
         """)
         return self.cur.fetchall()
     def get_order_details(self, order_id):
@@ -247,7 +248,14 @@ class LabDB:
         for name, result in results_dict.items():
             if name in self.test_map:
                 tid = self.test_map[name]
-                self.cur.execute("UPDATE order_tests SET result=? WHERE order_id=? AND test_id=?", (result, order_id, tid))
+                if isinstance(result, dict):
+                    stored = json.dumps(result, ensure_ascii=False)
+                else:
+                    stored = result
+                self.cur.execute(
+                    "UPDATE order_tests SET result=? WHERE order_id=? AND test_id=?",
+                    (stored, order_id, tid)
+                )
         # Verificar si quedan resultados vacíos
         self.cur.execute("SELECT COUNT(*) FROM order_tests WHERE order_id=? AND (result IS NULL OR result='')", (order_id,))
         remaining = self.cur.fetchone()[0]
