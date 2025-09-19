@@ -252,7 +252,7 @@ class LabDB:
             "emitted": emitted,
             "emitted_at": emitted_at,
         }
-        results = [(row[12], row[13]) for row in rows]
+        results = [(row[15], row[16]) for row in rows]
         return {"patient": patient_info, "order": order_info, "results": results}
     def save_results(self, order_id, results_dict):
         for name, result in results_dict.items():
