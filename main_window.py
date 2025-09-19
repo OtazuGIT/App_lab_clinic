@@ -1447,49 +1447,10 @@ class MainWindow(QMainWindow):
         order_date_text = ord_inf.get('date') or "-"
         requested_by = ord_inf.get('requested_by') or "-"
         diagnosis_text = ord_inf.get('diagnosis', "") or "-"
-        pdf = FPDF('P', 'mm', (105, 148))  # Formato compacto similar a 1/6 de A4
-        pdf.set_margins(6, 8, 6)
-        pdf.set_auto_page_break(True, margin=8)
+        pdf = FPDF('P', 'mm', 'A4')
+        pdf.set_margins(12, 12, 12)
+        pdf.set_auto_page_break(True, margin=14)
         pdf.add_page()
-        # Encabezado con banda y logotipos
-        pdf.set_fill_color(237, 242, 247)
-        pdf.rect(4, 4, pdf.w - 8, 22, 'F')
-        header_y = 6
-        def add_logo(position, x_pos, width):
-            path = self._find_logo_path(position)
-            if not path:
-                return
-            try:
-                pdf.image(path, x=x_pos, y=header_y, w=width)
-            except Exception:
-                pass
-        add_logo('left', pdf.l_margin - 1, 18)
-        add_logo('right', pdf.w - pdf.r_margin - 17, 17)
-        center_logo = self._find_logo_path('center')
-        if center_logo:
-            try:
-                pdf.image(center_logo, x=(pdf.w - 16) / 2, y=header_y + 0.5, w=16)
-            except Exception:
-                pass
-        pdf.set_xy(0, header_y)
-        pdf.set_font("Arial", 'B', 10)
-        pdf.set_text_color(25, 64, 109)
-        pdf.cell(0, 5, "LABORATORIO CLÍNICO", ln=1, align='C')
-        pdf.set_font("Arial", '', 7.5)
-        pdf.set_text_color(80, 95, 115)
-        pdf.cell(0, 4, LAB_TITLE, ln=1, align='C')
-        pdf.set_font("Arial", '', 6.8)
-        pdf.cell(0, 3.4, "Informe de resultados", ln=1, align='C')
-        pdf.set_text_color(0, 0, 0)
-        pdf.set_y(26)
-        pdf.set_draw_color(46, 117, 182)
-        pdf.set_line_width(0.35)
-        pdf.line(pdf.l_margin, pdf.get_y(), pdf.w - pdf.r_margin, pdf.get_y())
-        pdf.ln(1.5)
-        # Datos del paciente en diseño de dos columnas
-        usable_width = pdf.w - pdf.l_margin - pdf.r_margin
-        col_spacing = 2
-        col_width = (usable_width - col_spacing) / 2
         emission_row = ("Fecha emisión", emission_display)
         info_rows = [
             (("Paciente", pat.get('name') or '-'), ("Edad", age_text)),
@@ -1498,75 +1459,246 @@ class MainWindow(QMainWindow):
             (("Procedencia", pat.get('origin') or '-'), ("Fecha muestra", order_date_text)),
             (("Solicitante", requested_by), ("Diagnóstico", diagnosis_text)),
         ]
-        def write_label_value(label, value, width):
-            x = pdf.get_x()
-            y = pdf.get_y()
-            safe_value = str(value) if value not in (None, "") else "-"
-            pdf.set_font("Arial", 'B', 5.8)
-            pdf.set_text_color(88, 106, 126)
-            pdf.multi_cell(width, 3, label.upper(), border=0)
-            label_bottom = pdf.get_y()
-            pdf.set_xy(x, label_bottom - 0.5)
-            pdf.set_font("Arial", '', 6.8)
+
+        header_context = {
+            'info_rows': info_rows,
+            'emission_display': emission_display
+        }
+
+        def add_logo(position, x_pos, width, y_pos):
+            path = self._find_logo_path(position)
+            if not path:
+                return
+            try:
+                pdf.image(path, x=x_pos, y=y_pos, w=width)
+            except Exception:
+                pass
+
+        def draw_page_header():
+            pdf.set_fill_color(231, 238, 248)
+            pdf.rect(0, 0, pdf.w, 30, 'F')
+            top_y = pdf.t_margin - 4
+            add_logo('left', pdf.l_margin - 4, 22, top_y)
+            add_logo('right', pdf.w - pdf.r_margin - 18, 20, top_y)
+            center_logo = self._find_logo_path('center')
+            if center_logo:
+                try:
+                    pdf.image(center_logo, x=(pdf.w - 18) / 2, y=top_y + 1, w=18)
+                except Exception:
+                    pass
+            pdf.set_xy(0, top_y + 0.5)
+            pdf.set_font("Arial", 'B', 13)
+            pdf.set_text_color(21, 64, 120)
+            pdf.cell(0, 6, "LABORATORIO CLÍNICO", ln=1, align='C')
+            pdf.set_font("Arial", '', 9)
+            pdf.set_text_color(60, 78, 102)
+            pdf.cell(0, 4.5, LAB_TITLE, ln=1, align='C')
+            pdf.set_font("Arial", '', 8)
+            pdf.cell(0, 4, "Informe de resultados", ln=1, align='C')
             pdf.set_text_color(0, 0, 0)
-            pdf.multi_cell(width, 3.4, safe_value, border=0)
-            total_height = pdf.get_y() - y
-            pdf.set_xy(x + width, y)
-            return total_height
-        for left, right in info_rows:
-            row_start_y = pdf.get_y()
-            pdf.set_x(pdf.l_margin)
-            left_height = write_label_value(left[0], left[1], col_width)
-            pdf.set_x(pdf.l_margin + col_width + col_spacing)
-            right_height = write_label_value(right[0], right[1], col_width)
-            pdf.set_y(row_start_y + max(left_height, right_height) + 0.6)
-        pdf.ln(0.8)
-        pdf.set_draw_color(210, 210, 210)
-        pdf.set_line_width(0.2)
-        pdf.line(pdf.l_margin, pdf.get_y(), pdf.w - pdf.r_margin, pdf.get_y())
-        pdf.ln(1.2)
-        # Bloques de resultados
-        for test_name, raw_result in results:
-            structure = self._extract_result_structure(test_name, raw_result)
-            pdf.set_font("Arial", 'B', 7.4)
+            pdf.set_y(30)
+            pdf.set_draw_color(46, 117, 182)
+            pdf.set_line_width(0.4)
+            pdf.line(pdf.l_margin, pdf.get_y(), pdf.w - pdf.r_margin, pdf.get_y())
+            pdf.ln(2)
+            draw_patient_info()
+
+        def draw_patient_info():
+            table_width = pdf.w - pdf.l_margin - pdf.r_margin
+            col_spacing = 3
+            col_width = (table_width - col_spacing) / 2
+            label_font = ("Arial", 'B', 7)
+            value_font = ("Arial", '', 7.6)
+            pdf.set_font("Arial", 'B', 8)
+            pdf.set_text_color(21, 64, 120)
+            pdf.cell(0, 5, "Datos del paciente", ln=1)
+            pdf.set_text_color(0, 0, 0)
+            pdf.ln(1)
+            pdf.set_draw_color(205, 214, 226)
+            pdf.set_line_width(0.25)
+            pdf.set_fill_color(248, 251, 255)
+
+            def render_cell(label, value, width):
+                start_x = pdf.get_x()
+                start_y = pdf.get_y()
+                safe_value = str(value) if value not in (None, "") else "-"
+                pdf.rect(start_x, start_y, width, 9, 'F')
+                pdf.set_xy(start_x + 1.2, start_y + 1.2)
+                pdf.set_font(*label_font)
+                pdf.set_text_color(82, 98, 120)
+                pdf.cell(width - 2.4, 3, label.upper(), border=0)
+                pdf.set_font(*value_font)
+                pdf.set_text_color(0, 0, 0)
+                pdf.set_xy(start_x + 1.2, start_y + 4.2)
+                pdf.multi_cell(width - 2.4, 3.3, safe_value, border=0)
+                end_y = pdf.get_y()
+                total_height = max(9, end_y - start_y + 1.2)
+                pdf.set_draw_color(205, 214, 226)
+                pdf.rect(start_x, start_y, width, total_height)
+                pdf.set_xy(start_x + width, start_y)
+                return total_height
+
+            for left, right in header_context['info_rows']:
+                row_y = pdf.get_y()
+                pdf.set_x(pdf.l_margin)
+                left_height = render_cell(left[0], left[1], col_width)
+                pdf.set_x(pdf.l_margin + col_width + col_spacing)
+                right_height = render_cell(right[0], right[1], col_width)
+                pdf.set_y(row_y + max(left_height, right_height) + 1)
+            pdf.ln(2)
+
+        def ensure_space(required_height):
+            if pdf.get_y() + required_height > pdf.h - pdf.b_margin:
+                pdf.add_page()
+                draw_page_header()
+                return True
+            return False
+
+        def wrap_text(text, max_width):
+            if max_width <= 0:
+                return [str(text)]
+            if text in (None, ""):
+                text = "-"
+            text = str(text).replace('\r', ' ')
+            segments = []
+            for part in text.split('\n'):
+                stripped = part.strip()
+                if stripped:
+                    segments.append(stripped)
+            if not segments:
+                segments = [text.strip() or "-"]
+            lines = []
+            for segment in segments:
+                words = segment.split()
+                if not words:
+                    lines.append("-")
+                    continue
+                current = words[0]
+                for word in words[1:]:
+                    candidate = f"{current} {word}"
+                    if pdf.get_string_width(candidate) <= max_width:
+                        current = candidate
+                    else:
+                        lines.append(current)
+                        current = word
+                lines.append(current)
+            return lines or ["-"]
+
+        def render_table_header(widths, on_new_page=None):
+            header_height = 6
+            if ensure_space(header_height) and on_new_page:
+                on_new_page()
+                ensure_space(header_height)
+            pdf.set_font("Arial", 'B', 7.2)
             pdf.set_text_color(255, 255, 255)
             pdf.set_fill_color(46, 117, 182)
-            pdf.cell(0, 4.6, test_name.upper(), ln=1, fill=True)
+            x_start = pdf.l_margin
+            pdf.set_x(x_start)
+            headers = ["Parámetro", "Resultado", "Valores de referencia"]
+            for idx, title in enumerate(headers):
+                pdf.cell(widths[idx], header_height, title, border=1, align='C', fill=True)
+            pdf.ln(header_height)
             pdf.set_text_color(0, 0, 0)
-            pdf.ln(0.6)
+
+        def render_table_row(texts, widths, on_new_page):
+            line_height = 3.4
+            padding_x = 1.4
+            padding_y = 0.9
+            pdf.set_font("Arial", '', 6.8)
+            lines_by_cell = []
+            max_lines = 1
+            for idx, text in enumerate(texts):
+                available = max(widths[idx] - 2 * padding_x, 1)
+                lines = wrap_text(text, available)
+                lines_by_cell.append(lines)
+                if len(lines) > max_lines:
+                    max_lines = len(lines)
+            row_height = max_lines * line_height + 2 * padding_y
+            if ensure_space(row_height):
+                on_new_page()
+                render_table_header(widths)
+            x_start = pdf.l_margin
+            y_start = pdf.get_y()
+            pdf.set_draw_color(210, 215, 226)
+            pdf.set_line_width(0.2)
+            for idx, lines in enumerate(lines_by_cell):
+                cell_width = widths[idx]
+                x_pos = x_start + sum(widths[:idx])
+                pdf.set_fill_color(255, 255, 255)
+                pdf.rect(x_pos, y_start, cell_width, row_height)
+                text_y = y_start + padding_y
+                for line in lines:
+                    pdf.set_xy(x_pos + padding_x, text_y)
+                    pdf.cell(cell_width - 2 * padding_x, line_height, line, border=0)
+                    text_y += line_height
+            pdf.set_xy(pdf.l_margin, y_start + row_height)
+
+        def render_section_row(label, total_width, widths, on_new_page):
+            section_height = 4.2
+            if ensure_space(section_height + 1):
+                on_new_page()
+                render_table_header(widths)
+            pdf.set_font("Arial", 'B', 6.8)
+            pdf.set_fill_color(242, 246, 253)
+            pdf.set_text_color(47, 84, 150)
+            pdf.cell(total_width, section_height, label, border=1, ln=1, align='L', fill=True)
+            pdf.set_text_color(0, 0, 0)
+
+        draw_page_header()
+
+        table_total_width = pdf.w - pdf.l_margin - pdf.r_margin
+        column_widths = [table_total_width * 0.38, table_total_width * 0.27, table_total_width * 0.35]
+
+        def draw_test_header(title):
+            ensure_space(9)
+            pdf.set_font("Arial", 'B', 8.6)
+            pdf.set_text_color(255, 255, 255)
+            pdf.set_fill_color(46, 117, 182)
+            pdf.cell(0, 6, title.upper(), ln=1, fill=True)
+            pdf.set_text_color(0, 0, 0)
+            pdf.ln(1.2)
+
+        for test_name, raw_result in results:
+            structure = self._extract_result_structure(test_name, raw_result)
+            draw_test_header(test_name)
+            def on_new_page():
+                draw_test_header(test_name)
             if structure.get("type") == "structured":
+                render_table_header(column_widths, on_new_page)
                 for item in structure.get("items", []):
                     if item.get("type") == "section":
-                        pdf.set_font("Arial", 'B', 6.4)
-                        pdf.set_text_color(88, 106, 126)
-                        pdf.cell(0, 3.4, item.get("label", ""), ln=1)
-                        pdf.set_text_color(0, 0, 0)
+                        render_section_row(item.get("label", ""), sum(column_widths), column_widths, on_new_page)
                         continue
-                    detail_text = f"- {item.get('label', '')}: {item.get('value', '-')}"
-                    reference = item.get('reference')
-                    if reference:
-                        detail_text += f" | Ref: {reference}"
-                    pdf.set_font("Arial", '', 6.5)
-                    pdf.set_x(pdf.l_margin + 1.5)
-                    pdf.multi_cell(pdf.w - pdf.l_margin - pdf.r_margin - 1.5, 3.2, detail_text)
+                    row_texts = [
+                        item.get('label', ''),
+                        item.get('value', '-'),
+                        item.get('reference') or '-'
+                    ]
+                    render_table_row(row_texts, column_widths, on_new_page)
             else:
-                pdf.set_font("Arial", '', 6.8)
-                pdf.multi_cell(0, 3.4, structure.get("value", "-"))
-            pdf.ln(0.8)
+                value_text = structure.get("value", "-")
+                ensure_space(6)
+                pdf.set_font("Arial", '', 7)
+                pdf.multi_cell(0, 4, str(value_text))
+            pdf.ln(2)
+
         if ord_inf.get('observations'):
-            pdf.set_font("Arial", 'B', 6.8)
-            pdf.cell(0, 3.4, "Observaciones", ln=1)
-            pdf.set_font("Arial", '', 6.5)
-            pdf.multi_cell(0, 3.2, ord_inf['observations'])
-            pdf.ln(0.6)
+            ensure_space(8)
+            pdf.set_font("Arial", 'B', 7.4)
+            pdf.cell(0, 4.2, "Observaciones", ln=1)
+            pdf.set_font("Arial", '', 6.9)
+            pdf.multi_cell(0, 3.6, ord_inf['observations'])
+            pdf.ln(1.5)
+
+        ensure_space(12)
         pdf.set_draw_color(210, 210, 210)
         pdf.line(pdf.l_margin, pdf.get_y(), pdf.w - pdf.r_margin, pdf.get_y())
-        pdf.ln(1.2)
-        pdf.set_font("Arial", 'I', 6.2)
+        pdf.ln(2)
+        pdf.set_font("Arial", 'I', 6.5)
         pdf.set_text_color(110, 110, 110)
         disclaimer_text = ("Este documento es generado electrónicamente por el laboratorio. "
                            "Para validar la información, contacte a la unidad correspondiente.")
-        pdf.multi_cell(0, 3, disclaimer_text)
+        pdf.multi_cell(0, 3.4, disclaimer_text)
         pdf.set_text_color(0, 0, 0)
         try:
             pdf.output(file_path)
