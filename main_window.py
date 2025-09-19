@@ -1262,6 +1262,88 @@ class MainWindow(QMainWindow):
                 continue
             cleaned.append(stripped.replace("• ", ""))
         return " | ".join(cleaned)
+    def _calculate_age_years(self, patient_info, order_info):
+        age_value = order_info.get('age_years') if isinstance(order_info, dict) else None
+        if age_value is not None:
+            try:
+                return int(age_value)
+            except (TypeError, ValueError):
+                age_value = None
+        if age_value is None:
+            birth_date = patient_info.get('birth_date') if isinstance(patient_info, dict) else None
+            if birth_date:
+                bd = QDate.fromString(birth_date, "yyyy-MM-dd")
+                if bd.isValid():
+                    age_value = bd.daysTo(QDate.currentDate()) // 365
+        return age_value
+    def _format_age_text(self, patient_info, order_info):
+        age_value = self._calculate_age_years(patient_info, order_info)
+        return f"{age_value} años" if age_value is not None else "-"
+    def _extract_result_structure(self, test_name, raw_result):
+        parsed = self._parse_stored_result(raw_result)
+        template = TEST_TEMPLATES.get(test_name)
+        if parsed.get("type") == "structured" and template:
+            values = parsed.get("values", {})
+            items = []
+            for field_def in template.get("fields", []):
+                if field_def.get("type") == "section":
+                    label = field_def.get("label", "")
+                    if label:
+                        items.append({"type": "section", "label": label})
+                    continue
+                key = field_def.get("key")
+                if not key:
+                    continue
+                value = values.get(key, "")
+                if isinstance(value, str):
+                    display_value = " ".join(value.split())
+                else:
+                    display_value = value
+                if display_value in (None, ""):
+                    display_value = "-"
+                unit = field_def.get("unit")
+                field_type = field_def.get("type")
+                if unit and display_value not in ("-", "") and field_type not in ("bool", "text_area", "choice"):
+                    display_value = f"{display_value} {unit}"
+                items.append({
+                    "type": "value",
+                    "label": field_def.get("label", key),
+                    "value": display_value,
+                    "reference": field_def.get("reference")
+                })
+            return {"type": "structured", "items": items}
+        text_value = parsed.get("value", raw_result or "")
+        if isinstance(text_value, str):
+            text_value = text_value.strip()
+        if text_value == "":
+            text_value = "-"
+        return {"type": "text", "value": text_value}
+    def _find_logo_path(self, position):
+        if position not in {"left", "center", "right"}:
+            return None
+        search_dirs = ["", "assets", "resources", "images", "img", "static"]
+        base_names = [
+            f"logo_{position}.png",
+            f"logo_{position}.jpg",
+            f"logo_{position}.jpeg",
+            f"{position}_logo.png",
+            f"{position}_logo.jpg",
+        ]
+        if position == "center":
+            base_names.extend([
+                "logo.png",
+                "logo_central.png",
+                "logo_central.jpg",
+                "logo_centro.png",
+            ])
+        if position == "right":
+            base_names.extend(["logo_secondary.png", "logo_secundario.png"])
+        for directory in search_dirs:
+            for name in base_names:
+                candidate = os.path.join(directory, name) if directory else name
+                if os.path.exists(candidate):
+                    return candidate
+        return None
     def init_emitir_page(self):
         layout = QVBoxLayout(self.page_emitir)
         top_layout = QHBoxLayout()
@@ -1287,7 +1369,7 @@ class MainWindow(QMainWindow):
         layout.addLayout(sort_layout)
         self.output_text = QTextEdit(); self.output_text.setReadOnly(True)
         layout.addWidget(self.output_text)
-        btn_pdf = QPushButton("Exportar a PDF"); btn_excel = QPushButton("Exportar a Excel")
+        btn_pdf = QPushButton("Emitir en PDF"); btn_excel = QPushButton("Exportar a Excel")
         btns_layout = QHBoxLayout(); btns_layout.addWidget(btn_pdf); btns_layout.addWidget(btn_excel)
         layout.addLayout(btns_layout)
         btn_view.clicked.connect(self.display_selected_result)
@@ -1320,19 +1402,17 @@ class MainWindow(QMainWindow):
         if not info:
             return
         pat = info["patient"]; ord_inf = info["order"]; results = info["results"]
-        lines = [f"Paciente: {pat['name']} (Doc: {pat['doc_type']} {pat['doc_number']})"]
-        age_value = ord_inf.get('age_years')
-        if age_value is None and pat['birth_date']:
-            bd = QDate.fromString(pat['birth_date'], "yyyy-MM-dd")
-            if bd.isValid():
-                age_value = bd.daysTo(QDate.currentDate()) // 365
-        if age_value is not None:
-            lines.append(f"Edad: {age_value} años")
-        lines.append(f"Sexo: {pat['sex']}")
-        lines.append(f"Procedencia: {pat['origin']}")
-        lines.append(f"HCL: {pat['hcl']}")
-        lines.append(f"Fecha: {ord_inf['date']}")
-        lines.append(f"Solicitante: {ord_inf['requested_by']}")
+        doc_text = " ".join([part for part in (pat.get('doc_type'), pat.get('doc_number')) if part]) or "-"
+        lines = [f"Paciente: {pat.get('name') or '-'}", f"Documento: {doc_text}"]
+        age_value = self._calculate_age_years(pat, ord_inf)
+        lines.append(f"Edad: {age_value} años" if age_value is not None else "Edad: -")
+        lines.append(f"Sexo: {pat.get('sex') or '-'}")
+        lines.append(f"Historia Clínica: {pat.get('hcl') or '-'}")
+        lines.append(f"Procedencia: {pat.get('origin') or '-'}")
+        lines.append(f"Fecha de muestra: {ord_inf.get('date') or '-'}")
+        emission_display = ord_inf.get('emitted_at') or "Pendiente de emisión"
+        lines.append(f"Fecha de emisión: {emission_display}")
+        lines.append(f"Solicitante: {ord_inf.get('requested_by') or '-'}")
         if ord_inf.get("diagnosis") and ord_inf["diagnosis"].strip():
             lines.append(f"Diagnóstico presuntivo: {ord_inf['diagnosis']}")
         lines.append("Resultados:")
@@ -1341,6 +1421,7 @@ class MainWindow(QMainWindow):
         if ord_inf["observations"]:
             lines.append(f"Observaciones: {ord_inf['observations']}")
         self.output_text.setPlainText("\n".join(lines))
+
     def export_pdf(self):
         # Exportar el resultado seleccionado a un archivo PDF
         data = self.combo_completed.currentData()
@@ -1350,88 +1431,154 @@ class MainWindow(QMainWindow):
         info = self.labdb.get_order_details(order_id)
         if not info:
             return
-        # Seleccionar ruta de guardado
+        pat = info["patient"]; ord_inf = info["order"]; results = info["results"]
+        suggested_name = f"Orden_{order_id}.pdf"
         options = QFileDialog.Options()
-        file_path, _ = QFileDialog.getSaveFileName(self, "Guardar PDF", "", "Archivos PDF (*.pdf)", options=options)
+        file_path, _ = QFileDialog.getSaveFileName(self, "Guardar PDF", suggested_name, "Archivos PDF (*.pdf)", options=options)
         if not file_path:
             return
         if not file_path.lower().endswith(".pdf"):
             file_path += ".pdf"
-        pat = info["patient"]; ord_inf = info["order"]; results = info["results"]
-        pdf = FPDF()
-        pdf.set_auto_page_break(True, margin=15)
+        emission_time = datetime.datetime.now()
+        emission_display = emission_time.strftime("%d/%m/%Y %H:%M")
+        emission_timestamp = emission_time.strftime("%Y-%m-%d %H:%M:%S")
+        doc_text = " ".join([part for part in (pat.get('doc_type'), pat.get('doc_number')) if part]) or "-"
+        age_text = self._format_age_text(pat, ord_inf)
+        order_date_text = ord_inf.get('date') or "-"
+        requested_by = ord_inf.get('requested_by') or "-"
+        diagnosis_text = ord_inf.get('diagnosis', "") or "-"
+        pdf = FPDF('P', 'mm', (105, 148))  # Formato compacto similar a 1/6 de A4
+        pdf.set_margins(6, 8, 6)
+        pdf.set_auto_page_break(True, margin=8)
         pdf.add_page()
-        # Encabezado con logotipos opcionales
-        try:
-            if os.path.exists("logo_left.png"):
-                pdf.image("logo_left.png", x=10, y=8, w=25)
-            elif os.path.exists("logo.png"):
-                pdf.image("logo.png", x=10, y=8, w=25)
-            if os.path.exists("logo_right.png"):
-                pdf.image("logo_right.png", x=pdf.w - 35, y=8, w=25)
-        except Exception:
-            pass
-        pdf.set_font("Arial", 'B', 15)
-        pdf.cell(0, 10, LAB_TITLE, ln=1, align='C')
-        pdf.set_font("Arial", '', 11)
-        pdf.cell(0, 6, "Informe de resultados de laboratorio", ln=1, align='C')
-        pdf.ln(4)
-        pdf.set_draw_color(10, 132, 255)
-        pdf.set_line_width(0.4)
-        current_y = pdf.get_y()
-        pdf.line(10, current_y, pdf.w - 10, current_y)
-        pdf.ln(4)
-        # Datos del paciente
-        pdf.set_font("Arial", 'B', 11)
-        pdf.cell(0, 6, "Datos del paciente", ln=1)
-        pdf.set_font("Arial", '', 10)
-        pdf.cell(95, 6, f"Paciente: {pat['name']}", ln=0)
-        pdf.cell(0, 6, f"Documento: {pat['doc_type']} {pat['doc_number']}", ln=1)
-        age_value = ord_inf.get('age_years')
-        if age_value is None and pat['birth_date']:
-            bd = QDate.fromString(pat['birth_date'], "yyyy-MM-dd")
-            if bd.isValid():
-                age_value = bd.daysTo(QDate.currentDate()) // 365
-        age_text = f"{age_value} años" if age_value is not None else "-"
-        pdf.cell(95, 6, f"Edad: {age_text}", ln=0)
-        pdf.cell(0, 6, f"Sexo: {pat['sex']}", ln=1)
-        pdf.cell(95, 6, f"Procedencia: {pat['origin']}", ln=0)
-        pdf.cell(0, 6, f"HCL: {pat['hcl']}", ln=1)
-        pdf.cell(95, 6, f"Fecha y hora: {ord_inf['date']}", ln=0)
-        pdf.cell(0, 6, f"Solicitante: {ord_inf['requested_by']}", ln=1)
-        if ord_inf.get('diagnosis') and ord_inf['diagnosis'].strip():
-            pdf.multi_cell(0, 6, f"Diagnóstico presuntivo: {ord_inf['diagnosis']}")
-        pdf.ln(2)
-        # Resultados
-        pdf.set_font("Arial", 'B', 11)
-        pdf.cell(0, 6, "Resultados", ln=1)
-        for test_name, result in results:
-            lines = self._format_result_lines(test_name, result)
-            if not lines:
-                continue
-            if len(lines) == 1:
-                pdf.set_font("Arial", '', 10)
-                pdf.multi_cell(0, 6, lines[0], border=0)
+        # Encabezado con banda y logotipos
+        pdf.set_fill_color(237, 242, 247)
+        pdf.rect(4, 4, pdf.w - 8, 22, 'F')
+        header_y = 6
+        def add_logo(position, x_pos, width):
+            path = self._find_logo_path(position)
+            if not path:
+                return
+            try:
+                pdf.image(path, x=x_pos, y=header_y, w=width)
+            except Exception:
+                pass
+        add_logo('left', pdf.l_margin - 1, 18)
+        add_logo('right', pdf.w - pdf.r_margin - 17, 17)
+        center_logo = self._find_logo_path('center')
+        if center_logo:
+            try:
+                pdf.image(center_logo, x=(pdf.w - 16) / 2, y=header_y + 0.5, w=16)
+            except Exception:
+                pass
+        pdf.set_xy(0, header_y)
+        pdf.set_font("Arial", 'B', 10)
+        pdf.set_text_color(25, 64, 109)
+        pdf.cell(0, 5, "LABORATORIO CLÍNICO", ln=1, align='C')
+        pdf.set_font("Arial", '', 7.5)
+        pdf.set_text_color(80, 95, 115)
+        pdf.cell(0, 4, LAB_TITLE, ln=1, align='C')
+        pdf.set_font("Arial", '', 6.8)
+        pdf.cell(0, 3.4, "Informe de resultados", ln=1, align='C')
+        pdf.set_text_color(0, 0, 0)
+        pdf.set_y(26)
+        pdf.set_draw_color(46, 117, 182)
+        pdf.set_line_width(0.35)
+        pdf.line(pdf.l_margin, pdf.get_y(), pdf.w - pdf.r_margin, pdf.get_y())
+        pdf.ln(1.5)
+        # Datos del paciente en diseño de dos columnas
+        usable_width = pdf.w - pdf.l_margin - pdf.r_margin
+        col_spacing = 2
+        col_width = (usable_width - col_spacing) / 2
+        emission_row = ("Fecha emisión", emission_display)
+        info_rows = [
+            (("Paciente", pat.get('name') or '-'), ("Edad", age_text)),
+            (("Documento", doc_text), ("Sexo", pat.get('sex') or '-')),
+            (("Historia clínica", pat.get('hcl') or '-'), emission_row),
+            (("Procedencia", pat.get('origin') or '-'), ("Fecha muestra", order_date_text)),
+            (("Solicitante", requested_by), ("Diagnóstico", diagnosis_text)),
+        ]
+        def write_label_value(label, value, width):
+            x = pdf.get_x()
+            y = pdf.get_y()
+            safe_value = str(value) if value not in (None, "") else "-"
+            pdf.set_font("Arial", 'B', 5.8)
+            pdf.set_text_color(88, 106, 126)
+            pdf.multi_cell(width, 3, label.upper(), border=0)
+            label_bottom = pdf.get_y()
+            pdf.set_xy(x, label_bottom - 0.5)
+            pdf.set_font("Arial", '', 6.8)
+            pdf.set_text_color(0, 0, 0)
+            pdf.multi_cell(width, 3.4, safe_value, border=0)
+            total_height = pdf.get_y() - y
+            pdf.set_xy(x + width, y)
+            return total_height
+        for left, right in info_rows:
+            row_start_y = pdf.get_y()
+            pdf.set_x(pdf.l_margin)
+            left_height = write_label_value(left[0], left[1], col_width)
+            pdf.set_x(pdf.l_margin + col_width + col_spacing)
+            right_height = write_label_value(right[0], right[1], col_width)
+            pdf.set_y(row_start_y + max(left_height, right_height) + 0.6)
+        pdf.ln(0.8)
+        pdf.set_draw_color(210, 210, 210)
+        pdf.set_line_width(0.2)
+        pdf.line(pdf.l_margin, pdf.get_y(), pdf.w - pdf.r_margin, pdf.get_y())
+        pdf.ln(1.2)
+        # Bloques de resultados
+        for test_name, raw_result in results:
+            structure = self._extract_result_structure(test_name, raw_result)
+            pdf.set_font("Arial", 'B', 7.4)
+            pdf.set_text_color(255, 255, 255)
+            pdf.set_fill_color(46, 117, 182)
+            pdf.cell(0, 4.6, test_name.upper(), ln=1, fill=True)
+            pdf.set_text_color(0, 0, 0)
+            pdf.ln(0.6)
+            if structure.get("type") == "structured":
+                for item in structure.get("items", []):
+                    if item.get("type") == "section":
+                        pdf.set_font("Arial", 'B', 6.4)
+                        pdf.set_text_color(88, 106, 126)
+                        pdf.cell(0, 3.4, item.get("label", ""), ln=1)
+                        pdf.set_text_color(0, 0, 0)
+                        continue
+                    detail_text = f"• {item.get('label', '')}: {item.get('value', '-')}"
+                    reference = item.get('reference')
+                    if reference:
+                        detail_text += f" | Ref: {reference}"
+                    pdf.set_font("Arial", '', 6.5)
+                    pdf.set_x(pdf.l_margin + 1.5)
+                    pdf.multi_cell(pdf.w - pdf.l_margin - pdf.r_margin - 1.5, 3.2, detail_text)
             else:
-                pdf.set_font("Arial", 'B', 10)
-                pdf.multi_cell(0, 6, lines[0], border=0)
-                pdf.set_font("Arial", '', 10)
-                for line in lines[1:]:
-                    pdf.multi_cell(0, 6, line, border=0)
-            pdf.ln(1)
-        if ord_inf['observations']:
-            pdf.ln(2)
-            pdf.set_font("Arial", 'I', 9)
-            pdf.multi_cell(0, 6, f"Observaciones: {ord_inf['observations']}")
-        pdf.ln(4)
-        pdf.set_font("Arial", 'I', 8)
-        pdf.multi_cell(0, 5, "Este documento es generado automáticamente por el sistema del laboratorio."
-                                 " Para validar la autenticidad, confirme con el laboratorio responsable.")
+                pdf.set_font("Arial", '', 6.8)
+                pdf.multi_cell(0, 3.4, structure.get("value", "-"))
+            pdf.ln(0.8)
+        if ord_inf.get('observations'):
+            pdf.set_font("Arial", 'B', 6.8)
+            pdf.cell(0, 3.4, "Observaciones", ln=1)
+            pdf.set_font("Arial", '', 6.5)
+            pdf.multi_cell(0, 3.2, ord_inf['observations'])
+            pdf.ln(0.6)
+        pdf.set_draw_color(210, 210, 210)
+        pdf.line(pdf.l_margin, pdf.get_y(), pdf.w - pdf.r_margin, pdf.get_y())
+        pdf.ln(1.2)
+        pdf.set_font("Arial", 'I', 6.2)
+        pdf.set_text_color(110, 110, 110)
+        disclaimer_text = ("Este documento es generado electrónicamente por el laboratorio. "
+                           "Para validar la información, contacte a la unidad correspondiente.")
+        pdf.multi_cell(0, 3, disclaimer_text)
+        pdf.set_text_color(0, 0, 0)
         try:
             pdf.output(file_path)
-            QMessageBox.information(self, "PDF guardado", f"Reporte guardado en:\n{file_path}")
         except Exception as e:
             QMessageBox.warning(self, "Error", f"No se pudo guardar el PDF:\n{e}")
+            return
+        self.labdb.mark_order_emitted(order_id, emission_timestamp)
+        QMessageBox.information(self, "Informe emitido", f"Reporte guardado en:\n{file_path}")
+        self.populate_completed_orders()
+        self.output_text.clear()
+
+
     def export_excel(self):
         # Exportar todos los resultados a un archivo CSV (Excel puede abrirlo)
         options = QFileDialog.Options()

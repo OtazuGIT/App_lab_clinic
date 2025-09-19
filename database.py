@@ -64,6 +64,8 @@ class LabDB:
         # Asegurarse de que columnas nuevas existan para bases de datos creadas anteriormente
         self._ensure_column_exists("orders", "diagnosis", "TEXT", default_value="")
         self._ensure_column_exists("orders", "age_years", "INTEGER")
+        self._ensure_column_exists("orders", "emitted", "INTEGER", default_value="0")
+        self._ensure_column_exists("orders", "emitted_at", "TEXT")
         self.cur.execute("""
             CREATE TABLE IF NOT EXISTS order_tests (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -213,14 +215,14 @@ class LabDB:
             SELECT o.id, p.first_name, p.last_name, o.date, p.doc_type, p.doc_number
             FROM orders o
             JOIN patients p ON o.patient_id=p.id
-            WHERE o.completed=1
+            WHERE o.completed=1 AND (o.emitted IS NULL OR o.emitted=0)
             ORDER BY o.date ASC, o.id ASC
         """)
         return self.cur.fetchall()
     def get_order_details(self, order_id):
         self.cur.execute("""
             SELECT p.first_name, p.last_name, p.doc_type, p.doc_number, p.birth_date, p.sex, p.origin, p.hcl,
-                   o.date, o.observations, o.requested_by, o.diagnosis, o.age_years,
+                   o.date, o.observations, o.requested_by, o.diagnosis, o.age_years, o.emitted, o.emitted_at,
                    t.name, ot.result
             FROM orders o
             JOIN patients p ON o.patient_id = p.id
@@ -231,7 +233,7 @@ class LabDB:
         rows = self.cur.fetchall()
         if not rows:
             return None
-        first_name, last_name, doc_type, doc_number, birth_date, sex, origin, hcl, date, obs, req_by, diag, age_years, _, _ = rows[0]
+        first_name, last_name, doc_type, doc_number, birth_date, sex, origin, hcl, date, obs, req_by, diag, age_years, emitted, emitted_at, _, _ = rows[0]
         patient_info = {
             "name": f"{first_name} {last_name}",
             "doc_type": doc_type,
@@ -241,7 +243,15 @@ class LabDB:
             "origin": origin,
             "hcl": hcl
         }
-        order_info = {"date": date, "observations": obs, "requested_by": req_by, "diagnosis": diag, "age_years": age_years}
+        order_info = {
+            "date": date,
+            "observations": obs,
+            "requested_by": req_by,
+            "diagnosis": diag,
+            "age_years": age_years,
+            "emitted": emitted,
+            "emitted_at": emitted_at,
+        }
         results = [(row[12], row[13]) for row in rows]
         return {"patient": patient_info, "order": order_info, "results": results}
     def save_results(self, order_id, results_dict):
@@ -263,6 +273,12 @@ class LabDB:
         self.cur.execute("UPDATE orders SET completed=? WHERE id=?", (completed_flag, order_id))
         self.conn.commit()
         return completed_flag
+    def mark_order_emitted(self, order_id, emitted_at):
+        self.cur.execute(
+            "UPDATE orders SET emitted=1, emitted_at=? WHERE id=?",
+            (emitted_at, order_id)
+        )
+        self.conn.commit()
     def get_statistics(self):
         stats = {}
         self.cur.execute("SELECT COUNT(*) FROM patients"); stats["total_patients"] = self.cur.fetchone()[0]
