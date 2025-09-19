@@ -1,0 +1,57 @@
+diff --git a/main_window.py b/main_window.py
+index 2270a2aae591fb2431e55614d911c39d55454d06..c1607784d83018d0ed48d331dd6d30751991b088 100644
+--- a/main_window.py
++++ b/main_window.py
+@@ -1520,51 +1520,51 @@ class MainWindow(QMainWindow):
+             pdf.set_x(pdf.l_margin + col_width + col_spacing)
+             right_height = write_label_value(right[0], right[1], col_width)
+             pdf.set_y(row_start_y + max(left_height, right_height) + 0.6)
+         pdf.ln(0.8)
+         pdf.set_draw_color(210, 210, 210)
+         pdf.set_line_width(0.2)
+         pdf.line(pdf.l_margin, pdf.get_y(), pdf.w - pdf.r_margin, pdf.get_y())
+         pdf.ln(1.2)
+         # Bloques de resultados
+         for test_name, raw_result in results:
+             structure = self._extract_result_structure(test_name, raw_result)
+             pdf.set_font("Arial", 'B', 7.4)
+             pdf.set_text_color(255, 255, 255)
+             pdf.set_fill_color(46, 117, 182)
+             pdf.cell(0, 4.6, test_name.upper(), ln=1, fill=True)
+             pdf.set_text_color(0, 0, 0)
+             pdf.ln(0.6)
+             if structure.get("type") == "structured":
+                 for item in structure.get("items", []):
+                     if item.get("type") == "section":
+                         pdf.set_font("Arial", 'B', 6.4)
+                         pdf.set_text_color(88, 106, 126)
+                         pdf.cell(0, 3.4, item.get("label", ""), ln=1)
+                         pdf.set_text_color(0, 0, 0)
+                         continue
+-                    detail_text = f"• {item.get('label', '')}: {item.get('value', '-')}"
++                    detail_text = f"- {item.get('label', '')}: {item.get('value', '-')}"
+                     reference = item.get('reference')
+                     if reference:
+                         detail_text += f" | Ref: {reference}"
+                     pdf.set_font("Arial", '', 6.5)
+                     pdf.set_x(pdf.l_margin + 1.5)
+                     pdf.multi_cell(pdf.w - pdf.l_margin - pdf.r_margin - 1.5, 3.2, detail_text)
+             else:
+                 pdf.set_font("Arial", '', 6.8)
+                 pdf.multi_cell(0, 3.4, structure.get("value", "-"))
+             pdf.ln(0.8)
+         if ord_inf.get('observations'):
+             pdf.set_font("Arial", 'B', 6.8)
+             pdf.cell(0, 3.4, "Observaciones", ln=1)
+             pdf.set_font("Arial", '', 6.5)
+             pdf.multi_cell(0, 3.2, ord_inf['observations'])
+             pdf.ln(0.6)
+         pdf.set_draw_color(210, 210, 210)
+         pdf.line(pdf.l_margin, pdf.get_y(), pdf.w - pdf.r_margin, pdf.get_y())
+         pdf.ln(1.2)
+         pdf.set_font("Arial", 'I', 6.2)
+         pdf.set_text_color(110, 110, 110)
+         disclaimer_text = ("Este documento es generado electrónicamente por el laboratorio. "
+                            "Para validar la información, contacte a la unidad correspondiente.")
+         pdf.multi_cell(0, 3, disclaimer_text)
+         pdf.set_text_color(0, 0, 0)

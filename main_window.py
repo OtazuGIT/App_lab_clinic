@@ -1542,7 +1542,7 @@ class MainWindow(QMainWindow):
                         pdf.cell(0, 3.4, item.get("label", ""), ln=1)
                         pdf.set_text_color(0, 0, 0)
                         continue
-                    detail_text = f"• {item.get('label', '')}: {item.get('value', '-')}"
+                    detail_text = f"- {item.get('label', '')}: {item.get('value', '-')}"
                     reference = item.get('reference')
                     if reference:
                         detail_text += f" | Ref: {reference}"
