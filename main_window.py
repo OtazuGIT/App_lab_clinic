@@ -1412,9 +1412,6 @@ class MainWindow(QMainWindow):
         lines.append(f"Fecha de muestra: {ord_inf.get('date') or '-'}")
         emission_display = ord_inf.get('emitted_at') or "Pendiente de emisión"
         lines.append(f"Fecha de emisión: {emission_display}")
-        lines.append(f"Solicitante: {ord_inf.get('requested_by') or '-'}")
-        if ord_inf.get("diagnosis") and ord_inf["diagnosis"].strip():
-            lines.append(f"Diagnóstico presuntivo: {ord_inf['diagnosis']}")
         lines.append("Resultados:")
         for test_name, result in results:
             lines.extend(self._format_result_lines(test_name, result))
@@ -1445,8 +1442,6 @@ class MainWindow(QMainWindow):
         doc_text = " ".join([part for part in (pat.get('doc_type'), pat.get('doc_number')) if part]) or "-"
         age_text = self._format_age_text(pat, ord_inf)
         order_date_text = ord_inf.get('date') or "-"
-        requested_by = ord_inf.get('requested_by') or "-"
-        diagnosis_text = ord_inf.get('diagnosis', "") or "-"
         pdf = FPDF('P', 'mm', 'A4')
         pdf.set_margins(12, 12, 12)
         pdf.set_auto_page_break(True, margin=14)
@@ -1457,7 +1452,6 @@ class MainWindow(QMainWindow):
             (("Documento", doc_text), ("Sexo", pat.get('sex') or '-')),
             (("Historia clínica", pat.get('hcl') or '-'), emission_row),
             (("Procedencia", pat.get('origin') or '-'), ("Fecha muestra", order_date_text)),
-            (("Solicitante", requested_by), ("Diagnóstico", diagnosis_text)),
         ]
 
         header_context = {
@@ -1690,16 +1684,6 @@ class MainWindow(QMainWindow):
             pdf.multi_cell(0, 3.6, ord_inf['observations'])
             pdf.ln(1.5)
 
-        ensure_space(12)
-        pdf.set_draw_color(210, 210, 210)
-        pdf.line(pdf.l_margin, pdf.get_y(), pdf.w - pdf.r_margin, pdf.get_y())
-        pdf.ln(2)
-        pdf.set_font("Arial", 'I', 6.5)
-        pdf.set_text_color(110, 110, 110)
-        disclaimer_text = ("Este documento es generado electrónicamente por el laboratorio. "
-                           "Para validar la información, contacte a la unidad correspondiente.")
-        pdf.multi_cell(0, 3.4, disclaimer_text)
-        pdf.set_text_color(0, 0, 0)
         try:
             pdf.output(file_path)
         except Exception as e:
