@@ -324,7 +324,7 @@ class LabDB:
         self.cur.execute(
             """
             SELECT o.id, o.date, p.first_name, p.last_name, p.doc_type, p.doc_number,
-                   o.age_years, t.name, ot.result
+                   o.age_years, t.name, t.category, ot.result
             FROM order_tests ot
             JOIN orders o ON ot.order_id = o.id
             JOIN patients p ON o.patient_id = p.id
@@ -387,6 +387,27 @@ class LabDB:
             self.cur.execute("UPDATE orders SET completed=0 WHERE id=?", (order_id,))
         self.conn.commit()
         return added
+
+    def get_patient_history_by_document(self, doc_number, doc_type=None):
+        if not doc_number:
+            return []
+        params = [doc_number]
+        query = """
+            SELECT o.id, o.date, t.name, ot.result, t.category,
+                   p.first_name, p.last_name, p.doc_type, p.doc_number,
+                   o.age_years, o.emitted, o.emitted_at
+            FROM orders o
+            JOIN patients p ON o.patient_id = p.id
+            JOIN order_tests ot ON ot.order_id = o.id
+            JOIN tests t ON ot.test_id = t.id
+            WHERE p.doc_number = ?
+        """
+        if doc_type:
+            query += " AND p.doc_type = ?"
+            params.append(doc_type)
+        query += " ORDER BY datetime(o.date) DESC, o.id DESC, t.name ASC"
+        self.cur.execute(query, params)
+        return self.cur.fetchall()
 
     def _ensure_test_renamed(self, old_name, new_name):
         if old_name == new_name:

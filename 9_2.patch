@@ -1,0 +1,1449 @@
+diff --git a/main_window.py b/main_window.py
+index 18d207d37106f4fb42d32b155317205c70eb0f6f..2a40040635d363f85c12b8bf6699c79bbb1e3212 100644
+--- a/main_window.py
++++ b/main_window.py
+@@ -1,30 +1,31 @@
+ # main_window.py
+ import copy
+ import datetime
+ import json
+ import os
++from collections import OrderedDict
+ from PyQt5.QtWidgets import (QMainWindow, QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout,
+                              QStackedWidget, QFormLayout, QScrollArea, QGroupBox, QComboBox,
+                              QLineEdit, QTextEdit, QTableWidget, QTableWidgetItem, QFileDialog, QMessageBox, QCheckBox,
+                              QDateEdit, QRadioButton, QButtonGroup, QDialog, QDialogButtonBox, QListWidget, QListWidgetItem)
+ from PyQt5.QtCore import QDate, QDateTime, Qt, QTimer
+ from fpdf import FPDF  # Asegúrese de tener fpdf instalado (pip install fpdf)
+ 
+ LAB_TITLE = "Laboratorio P.S. Iñapari - 002789"
+ 
+ # Definiciones de plantillas de resultados estructurados por examen
+ HEMOGRAM_BASE_FIELDS = [
+     {
+         "key": "hematocrito",
+         "label": "Hematocrito (Hto)",
+         "unit": "%",
+         "reference": (
+             "RN: 44-65 %\n"
+             "Niños 1-10 a: 35-45 %\n"
+             "Hombres adultos: 40-54 %\n"
+             "Mujeres adultas: 36-47 %\n"
+             "Gestantes (2°-3° trim): 33-43 %"
+         ),
+         "placeholder": "Ej. 42.5"
+     },
+     {
+diff --git a/main_window.py b/main_window.py
+index 18d207d37106f4fb42d32b155317205c70eb0f6f..2a40040635d363f85c12b8bf6699c79bbb1e3212 100644
+--- a/main_window.py
++++ b/main_window.py
+@@ -32,73 +33,87 @@ HEMOGRAM_BASE_FIELDS = [
+         "label": "Hemoglobina (Hb)",
+         "unit": "g/dL",
+         "reference": (
+             "RN: 14.0-24.0 g/dL\n"
+             "1-12 meses: 10.0-12.5 g/dL\n"
+             "Niños 1-12 años: 11.5-15.5 g/dL\n"
+             "Mujeres adultas: 12.0-16.0 g/dL\n"
+             "Hombres adultos: 13.5-17.5 g/dL\n"
+             "Gestantes (2°-3° trim): ≥11.0 g/dL"
+         ),
+         "placeholder": "Ej. 14.1"
+     },
+     {
+         "key": "leucocitos",
+         "label": "Leucocitos",
+         "unit": "/µL",
+         "reference": (
+             "RN: 9 000-30 000 /µL\n"
+             "1-12 meses: 6 000-17 500 /µL\n"
+             "Niños 1-6 años: 5 000-15 500 /µL\n"
+             "Niños 6-18 años: 4 500-13 500 /µL\n"
+             "Adultos: 4 500-11 000 /µL"
+         ),
+         "placeholder": "Ej. 7 500"
+     },
++    {
++        "key": "leucocitos_conteo",
++        "label": "Agregar conteo (leucocitos)",
++        "helper": "Ingrese el conteo manual; se multiplicará por 50 para el total",
++        "optional": True,
++        "placeholder": "Ej. 120"
++    },
+     {
+         "key": "eritrocitos",
+         "label": "Recuento de hematíes (RBC)",
+         "unit": "millones/µL",
+         "reference": (
+             "RN: 4.1-6.1 millones/µL\n"
+             "Niños 1-10 años: 3.9-5.3 millones/µL\n"
+             "Hombres adultos: 4.5-6.0 millones/µL\n"
+             "Mujeres adultas: 4.0-5.4 millones/µL"
+         ),
+         "placeholder": "Ej. 4.8"
+     },
+     {
+         "key": "plaquetas",
+         "label": "Plaquetas",
+         "unit": "/µL",
+         "reference": (
+             "RN: 150 000-450 000 /µL\n"
+             "Niños: 150 000-450 000 /µL\n"
+             "Adultos: 150 000-400 000 /µL"
+         ),
+         "placeholder": "Ej. 250 000"
+     },
++    {
++        "key": "plaquetas_conteo",
++        "label": "Agregar conteo (plaquetas)",
++        "helper": "Ingrese el conteo manual; se multiplicará por 15000 para el total",
++        "optional": True,
++        "placeholder": "Ej. 12"
++    },
+     {
+         "key": "segmentados",
+         "label": "Segmentados",
+         "unit": "%",
+         "reference": (
+             "Adultos: 40-75 %\n"
+             "Niños 1-6 años: 30-60 %"
+         )
+     },
+     {
+         "key": "abastonados",
+         "label": "Abastonados",
+         "unit": "%",
+         "reference": "0-6 %",
+         "optional": True
+     },
+     {
+         "key": "linfocitos",
+         "label": "Linfocitos",
+         "unit": "%",
+         "reference": (
+             "RN: 22-35 %\n"
+             "Niños 1-6 años: 40-65 %\n"
+             "Adultos: 20-45 %"
+         )
+diff --git a/main_window.py b/main_window.py
+index 18d207d37106f4fb42d32b155317205c70eb0f6f..2a40040635d363f85c12b8bf6699c79bbb1e3212 100644
+--- a/main_window.py
++++ b/main_window.py
+@@ -375,63 +390,99 @@ WIDAL_FIELDS = [
+     {"key": "antigeno_ah", "label": "Antígeno AH", "reference": "Negativo: <1:80", "optional": True},
+     {"key": "antigeno_bh", "label": "Antígeno BH", "reference": "Negativo: <1:80", "optional": True},
+     {"key": "observaciones", "label": "Observaciones", "type": "text_area", "optional": True}
+ ]
+ 
+ def build_sample_tracking_template(reference_note):
+     return {
+         "fields": [
+             {"key": "hora_toma", "label": "Hora de toma/envío", "placeholder": "HH:MM", "reference": "Registrar hora oficial de la toma"},
+             {"key": "destino", "label": "Destino / referencia", "optional": True, "placeholder": "Ej. Laboratorio de referencia"},
+             {"key": "observaciones", "label": "Observaciones", "type": "text_area", "optional": True, "reference": reference_note}
+         ]
+     }
+ 
+ TEST_TEMPLATES = {
+     "Hemograma manual": {
+         "fields": copy.deepcopy(HEMOGRAM_BASE_FIELDS),
+         "auto_calculations": [
+             {
+                 "source": "hematocrito",
+                 "target": "hemoglobina",
+                 "operation": "divide",
+                 "operand": 3.03,
+                 "decimals": 2,
+                 "description": "Hb = Hto / 3.03 (cálculo automático)",
++            },
++            {
++                "source": "leucocitos_conteo",
++                "target": "leucocitos",
++                "operation": "multiply",
++                "operand": 50,
++                "decimals": 0,
++                "description": "Total de leucocitos = conteo × 50",
++                "clear_on_invalid": True
++            },
++            {
++                "source": "plaquetas_conteo",
++                "target": "plaquetas",
++                "operation": "multiply",
++                "operand": 15000,
++                "decimals": 0,
++                "description": "Total de plaquetas = conteo × 15000",
++                "clear_on_invalid": True
+             }
+         ]
+     },
+     "Hemograma automatizado": {
+         "fields": copy.deepcopy(HEMOGRAM_BASE_FIELDS),
+         "auto_calculations": [
+             {
+                 "source": "hematocrito",
+                 "target": "hemoglobina",
+                 "operation": "divide",
+                 "operand": 3.03,
+                 "decimals": 2,
+                 "description": "Hb = Hto / 3.03 (cálculo automático)",
++            },
++            {
++                "source": "leucocitos_conteo",
++                "target": "leucocitos",
++                "operation": "multiply",
++                "operand": 50,
++                "decimals": 0,
++                "description": "Total de leucocitos = conteo × 50",
++                "clear_on_invalid": True
++            },
++            {
++                "source": "plaquetas_conteo",
++                "target": "plaquetas",
++                "operation": "multiply",
++                "operand": 15000,
++                "decimals": 0,
++                "description": "Total de plaquetas = conteo × 15000",
++                "clear_on_invalid": True
+             }
+         ]
+     },
+     "Examen completo de orina": {"fields": copy.deepcopy(URINE_BASE_FIELDS)},
+     "Sedimento urinario": {"fields": copy.deepcopy(SEDIMENTO_FIELDS)},
+     "Examen coprológico (directo)": {"fields": copy.deepcopy(COPRO_DIRECT_FIELDS)},
+     "Examen coprológico (concentración)": {"fields": copy.deepcopy(COPRO_CONCENT_FIELDS)},
+     "Coloración de Gram": {"fields": copy.deepcopy(GRAM_FIELDS)},
+     "Reacción inflamatoria": {"fields": copy.deepcopy(REACTION_FIELDS)},
+     "Test de aminas": {
+         "fields": [
+             {"key": "resultado", "label": "Resultado", "type": "bool", "positive_text": "Positivo", "negative_text": "Negativo", "reference": "Negativo"},
+             {"key": "olor_caracteristico", "label": "Olor característico", "optional": True},
+             {"key": "observaciones", "label": "Observaciones", "type": "text_area", "optional": True}
+         ]
+     },
+     "Test de Helecho": {
+         "fields": [
+             {"key": "resultado", "label": "Resultado", "type": "bool", "positive_text": "Positivo", "negative_text": "Negativo", "reference": "Patrón negativo"},
+             {"key": "observaciones", "label": "Observaciones", "type": "text_area", "optional": True}
+         ]
+     },
+     "Secreción vaginal": {"fields": copy.deepcopy(SECRECION_VAGINAL_FIELDS)},
+     "Secreción (otros sitios)": {"fields": copy.deepcopy(SECRECION_GENERAL_FIELDS)},
+     "Constantes corpusculares": {"fields": copy.deepcopy(CONST_CORPUSCULAR_FIELDS)},
+diff --git a/main_window.py b/main_window.py
+index 18d207d37106f4fb42d32b155317205c70eb0f6f..2a40040635d363f85c12b8bf6699c79bbb1e3212 100644
+--- a/main_window.py
++++ b/main_window.py
+@@ -870,51 +921,51 @@ RAPID_TEST_NAMES = [
+ 
+ for rapid_test in RAPID_TEST_NAMES:
+     if rapid_test not in TEST_TEMPLATES:
+         TEST_TEMPLATES[rapid_test] = build_bool_observation_template()
+ 
+ 
+ 
+ class AddTestsDialog(QDialog):
+     def __init__(self, tests, disabled_tests=None, parent=None):
+         super().__init__(parent)
+         self.setWindowTitle("Agregar pruebas a la orden")
+         self.setMinimumSize(420, 480)
+         layout = QVBoxLayout(self)
+         description = QLabel("Seleccione las pruebas adicionales que desea agregar a la orden actual.")
+         description.setWordWrap(True)
+         layout.addWidget(description)
+         self.list_widget = QListWidget()
+         self.list_widget.setSelectionMode(QListWidget.MultiSelection)
+         disabled_set = set(disabled_tests or [])
+         for name, category in tests:
+             display_text = f"{name} ({category})" if category else name
+             item = QListWidgetItem(display_text)
+             item.setData(Qt.UserRole, name)
+             if name in disabled_set:
+                 item.setFlags(item.flags() & ~Qt.ItemIsEnabled)
+-                item.setText(f"{display_text} — ya incluido")
++                item.setText(f"{display_text} - ya incluido")
+             self.list_widget.addItem(item)
+         layout.addWidget(self.list_widget)
+         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+         buttons.accepted.connect(self.accept)
+         buttons.rejected.connect(self.reject)
+         layout.addWidget(buttons)
+ 
+     def get_selected_tests(self):
+         return [item.data(Qt.UserRole) for item in self.list_widget.selectedItems() if item.flags() & Qt.ItemIsEnabled]
+ 
+ 
+ class MainWindow(QMainWindow):
+     def __init__(self, labdb, user):
+         super().__init__()
+         self.labdb = labdb
+         self.user = user
+         self.setWindowTitle(LAB_TITLE)
+         # Configuración de ventana principal y menú lateral
+         central_widget = QWidget()
+         main_layout = QHBoxLayout(central_widget)
+         side_menu_layout = QVBoxLayout()
+         side_menu_widget = QWidget()
+         side_menu_widget.setLayout(side_menu_layout)
+         side_menu_widget.setFixedWidth(200)
+         side_menu_widget.setStyleSheet("background-color: #2c3e50;")
+diff --git a/main_window.py b/main_window.py
+index 18d207d37106f4fb42d32b155317205c70eb0f6f..2a40040635d363f85c12b8bf6699c79bbb1e3212 100644
+--- a/main_window.py
++++ b/main_window.py
+@@ -1837,160 +1888,271 @@ class MainWindow(QMainWindow):
+             return ""
+         field_type = field_info.get("type")
+         if field_type == "line":
+             widget = field_info.get("widget")
+             return widget.text().strip() if widget else ""
+         if field_type == "text_area":
+             widget = field_info.get("widget")
+             return widget.toPlainText().strip() if widget else ""
+         if field_type == "combo":
+             widget = field_info.get("widget")
+             return widget.currentText().strip() if widget else ""
+         if field_type == "bool":
+             if field_info.get("positive") and field_info["positive"].isChecked():
+                 return field_info.get("positive_text", "Positivo")
+             if field_info.get("negative") and field_info["negative"].isChecked():
+                 return field_info.get("negative_text", "Negativo")
+             return ""
+         return ""
+     def _to_float(self, text):
+         if text in (None, ""):
+             return None
+         try:
+             return float(str(text).replace(',', '.'))
+         except ValueError:
+             return None
++
++    def _ensure_latin1(self, text):
++        if text is None:
++            return ""
++        if not isinstance(text, str):
++            text = str(text)
++        replacements = {
++            '\u2013': '-',
++            '\u2014': '-',
++            '\u2018': "'",
++            '\u2019': "'",
++            '\u201c': '"',
++            '\u201d': '"'
++        }
++        for bad, good in replacements.items():
++            text = text.replace(bad, good)
++        try:
++            text.encode('latin-1')
++            return text
++        except UnicodeEncodeError:
++            return text.encode('latin-1', 'replace').decode('latin-1')
++
++    def _is_blank_result(self, value):
++        if value is None:
++            return True
++        if isinstance(value, str):
++            return value.strip() == ""
++        return False
+     def _format_result_lines(self, test_name, raw_result):
+         parsed = self._parse_stored_result(raw_result)
+         template = TEST_TEMPLATES.get(test_name)
+         if parsed.get("type") == "structured" and template:
+             values = parsed.get("values", {})
+-            lines = [f"{test_name}:"]
++            value_lines = []
++            pending_section = None
+             for field_def in template.get("fields", []):
+                 if field_def.get("type") == "section":
+                     section_label = field_def.get("label", "")
+-                    if section_label:
+-                        lines.append(f"  {section_label}:")
++                    pending_section = f"  {section_label}:" if section_label else None
+                     continue
+                 key = field_def.get("key")
+                 if not key:
+                     continue
+                 value = values.get(key, "")
+                 if isinstance(value, str):
++                    stripped = value.strip()
++                    if stripped == "":
++                        continue
+                     display_value = " ".join(value.splitlines()).strip()
+                 else:
++                    if self._is_blank_result(value):
++                        continue
+                     display_value = value
+-                if display_value in (None, ""):
+-                    display_value = "-"
+                 unit = field_def.get("unit")
+                 field_type = field_def.get("type")
+-                if unit and display_value not in ("-", "") and field_type not in ("bool", "text_area", "choice"):
++                if unit and field_type not in ("bool", "text_area", "choice"):
+                     display_text = str(display_value)
+                     if not display_text.endswith(unit):
+                         display_value = f"{display_text} {unit}"
+                 reference = field_def.get("reference")
+                 label = field_def.get("label", key)
++                if pending_section:
++                    value_lines.append(pending_section)
++                    pending_section = None
+                 bullet = f"  • {label}: {display_value}"
+                 if reference:
+                     bullet += f" (Ref: {reference})"
+-                lines.append(bullet)
+-            return lines
++                value_lines.append(bullet)
++            if not value_lines:
++                return []
++            return [f"{test_name}:"] + value_lines
+         text_value = parsed.get("value", raw_result or "")
+         if isinstance(text_value, str):
+             text_value = text_value.strip()
+-        if text_value == "":
+-            text_value = "-"
++            if text_value == "":
++                return []
++        elif self._is_blank_result(text_value):
++            return []
+         return [f"{test_name}: {text_value}"]
+     def _format_result_for_export(self, test_name, raw_result):
+         lines = self._format_result_lines(test_name, raw_result)
++        if not lines:
++            return ""
+         if len(lines) <= 1:
+             line = lines[0]
+             parts = line.split(": ", 1)
+             return parts[1] if len(parts) > 1 else line
+         cleaned = []
+         for line in lines[1:]:
+             stripped = line.strip()
+             if stripped.endswith(":") and "•" not in stripped:
+                 continue
+             cleaned.append(stripped.replace("• ", ""))
+         return " | ".join(cleaned)
++
++    def _map_category_group(self, category):
++        normalized = (category or "").strip().upper()
++        if normalized == "HEMATOLOGÍA":
++            return "hematology"
++        if normalized == "BIOQUÍMICA":
++            return "biochemistry"
++        if normalized in {"MICROBIOLOGÍA", "PARASITOLOGÍA", "MICROSCOPÍA"}:
++            return "micro_parasito"
++        return "others"
++
++    def _aggregate_results_by_order(self, records):
++        group_keys = ["hematology", "biochemistry", "micro_parasito", "others"]
++        aggregated = []
++        grouped = OrderedDict()
++        for record in records:
++            result_value = record.get("result", "")
++            if isinstance(result_value, str):
++                if result_value.strip() == "":
++                    continue
++            elif self._is_blank_result(result_value):
++                continue
++            order_id = record.get("order_id")
++            if order_id is None:
++                continue
++            entry = grouped.get(order_id)
++            if not entry:
++                entry = {
++                    "order_id": order_id,
++                    "date": record.get("date", ""),
++                    "patient": record.get("patient", ""),
++                    "document": record.get("document", ""),
++                    "age": record.get("age", ""),
++                    "emitted": record.get("emitted"),
++                    "emitted_at": record.get("emitted_at"),
++                    "groups": {key: [] for key in group_keys}
++                }
++                grouped[order_id] = entry
++            group_key = self._map_category_group(record.get("category"))
++            test_name = record.get("test") or ""
++            result_text = record.get("result", "")
++            summary = test_name
++            if test_name and result_text:
++                summary = f"{test_name}: {result_text}"
++            elif result_text:
++                summary = result_text
++            entry["groups"].setdefault(group_key, []).append(summary.strip())
++        for entry in grouped.values():
++            if any(entry["groups"].get(key) for key in group_keys):
++                aggregated.append(entry)
++        return aggregated
++
++    def _format_emission_status(self, emitted_flag, emitted_at):
++        if emitted_flag:
++            if emitted_at:
++                try:
++                    parsed = datetime.datetime.strptime(emitted_at, "%Y-%m-%d %H:%M:%S")
++                    return f"Sí ({parsed.strftime('%d/%m/%Y')})"
++                except Exception:
++                    return "Sí"
++            return "Sí"
++        if emitted_flag == 0:
++            return "No"
++        return "-"
+     def _calculate_age_years(self, patient_info, order_info):
+         age_value = order_info.get('age_years') if isinstance(order_info, dict) else None
+         if age_value is not None:
+             try:
+                 return int(age_value)
+             except (TypeError, ValueError):
+                 age_value = None
+         if age_value is None:
+             birth_date = patient_info.get('birth_date') if isinstance(patient_info, dict) else None
+             if birth_date:
+                 bd = QDate.fromString(birth_date, "yyyy-MM-dd")
+                 if bd.isValid():
+                     age_value = bd.daysTo(QDate.currentDate()) // 365
+         return age_value
+     def _format_age_text(self, patient_info, order_info):
+         age_value = self._calculate_age_years(patient_info, order_info)
+         return f"{age_value} años" if age_value is not None else "-"
+     def _extract_result_structure(self, test_name, raw_result):
+         parsed = self._parse_stored_result(raw_result)
+         template_key = parsed.get("template") if isinstance(parsed, dict) else None
+         template = TEST_TEMPLATES.get(template_key) if template_key in TEST_TEMPLATES else TEST_TEMPLATES.get(test_name)
+         if parsed.get("type") == "structured" and template:
+             values = parsed.get("values", {})
+             items = []
++            pending_section = None
+             for field_def in template.get("fields", []):
+                 if field_def.get("type") == "section":
+-                    label = field_def.get("label", "")
+-                    if label:
+-                        items.append({"type": "section", "label": label})
++                    pending_section = field_def.get("label", "") or None
+                     continue
+                 key = field_def.get("key")
+                 if not key:
+                     continue
+                 value = values.get(key, "")
+                 if isinstance(value, str):
++                    stripped = value.strip()
++                    if stripped == "":
++                        continue
+                     display_value = " ".join(value.split())
+                 else:
++                    if self._is_blank_result(value):
++                        continue
+                     display_value = value
+-                if display_value in (None, ""):
+-                    display_value = "-"
+                 unit = field_def.get("unit")
+                 field_type = field_def.get("type")
+-                if unit and display_value not in ("-", "") and field_type not in ("bool", "text_area", "choice"):
+-                    display_value = f"{display_value} {unit}"
++                if unit and field_type not in ("bool", "text_area", "choice"):
++                    display_value = f"{display_value} {unit}" if not str(display_value).endswith(unit) else display_value
++                if pending_section:
++                    items.append({"type": "section", "label": pending_section})
++                    pending_section = None
+                 items.append({
+                     "type": "value",
+                     "label": field_def.get("label", key),
+                     "value": display_value,
+                     "reference": field_def.get("reference")
+                 })
+             return {"type": "structured", "items": items}
+         text_value = parsed.get("value", raw_result or "")
+         if isinstance(text_value, str):
+             text_value = text_value.strip()
+-        if text_value == "":
+-            text_value = "-"
++            if text_value == "":
++                return {"type": "text", "value": ""}
++        elif self._is_blank_result(text_value):
++            return {"type": "text", "value": ""}
+         return {"type": "text", "value": text_value}
+     def _find_logo_path(self, position):
+         if position not in {"left", "center", "right"}:
+             return None
+         search_dirs = ["", "assets", "resources", "images", "img", "static"]
+         base_names = [
+             f"logo_{position}.png",
+             f"logo_{position}.jpg",
+             f"logo_{position}.jpeg",
+             f"{position}_logo.png",
+             f"{position}_logo.jpg",
+         ]
+         if position == "center":
+             base_names.extend([
+                 "logo.png",
+                 "logo_central.png",
+                 "logo_central.jpg",
+                 "logo_centro.png",
+             ])
+         if position == "right":
+             base_names.extend(["logo_secondary.png", "logo_secundario.png"])
+         for directory in search_dirs:
+             for name in base_names:
+                 candidate = os.path.join(directory, name) if directory else name
+                 if os.path.exists(candidate):
+diff --git a/main_window.py b/main_window.py
+index 18d207d37106f4fb42d32b155317205c70eb0f6f..2a40040635d363f85c12b8bf6699c79bbb1e3212 100644
+--- a/main_window.py
++++ b/main_window.py
+@@ -2104,51 +2266,53 @@ class MainWindow(QMainWindow):
+         if not info:
+             return
+         pat = info["patient"]; ord_inf = info["order"]; results = info["results"]
+         doc_text = " ".join([part for part in (pat.get('doc_type'), pat.get('doc_number')) if part]) or "-"
+         lines = [f"PACIENTE: {pat.get('name') or '-'}", f"DOCUMENTO: {doc_text}"]
+         age_value = self._calculate_age_years(pat, ord_inf)
+         lines.append(f"EDAD: {age_value} AÑOS" if age_value is not None else "EDAD: -")
+         lines.append(f"SEXO: {pat.get('sex') or '-'}")
+         lines.append(f"HISTORIA CLÍNICA: {pat.get('hcl') or '-'}")
+         lines.append(f"PROCEDENCIA: {pat.get('origin') or '-'}")
+         lines.append(f"FECHA DE MUESTRA: {ord_inf.get('date') or '-'}")
+         lines.append(f"SOLICITANTE: {ord_inf.get('requested_by') or '-'}")
+         lines.append(f"DIAGNÓSTICO PRESUNTIVO: {ord_inf.get('diagnosis') or '-'}")
+         emission_raw = ord_inf.get('emitted_at')
+         if emission_raw:
+             try:
+                 emission_dt = datetime.datetime.strptime(emission_raw, "%Y-%m-%d %H:%M:%S")
+                 emission_display = emission_dt.strftime("%d/%m/%Y %H:%M")
+             except Exception:
+                 emission_display = emission_raw
+         else:
+             emission_display = "Pendiente de emisión"
+         lines.append(f"FECHA DE EMISIÓN: {emission_display}")
+         lines.append("RESULTADOS:")
+         for test_name, result, _ in results:
+-            lines.extend(self._format_result_lines(test_name, result))
++            formatted_lines = self._format_result_lines(test_name, result)
++            if formatted_lines:
++                lines.extend(formatted_lines)
+         if ord_inf["observations"]:
+             lines.append(f"Observaciones: {ord_inf['observations']}")
+         self.output_text.setPlainText("\n".join(lines))
+ 
+     def export_pdf(self):
+         # Exportar el resultado seleccionado a un archivo PDF
+         data = self.combo_completed.currentData()
+         if data is None:
+             return
+         order_id = int(data)
+         info = self.labdb.get_order_details(order_id)
+         if not info:
+             return
+         pat = info["patient"]; ord_inf = info["order"]; results = info["results"]
+         suggested_name = f"Orden_{order_id}.pdf"
+         options = QFileDialog.Options()
+         file_path, _ = QFileDialog.getSaveFileName(self, "Guardar PDF", suggested_name, "Archivos PDF (*.pdf)", options=options)
+         if not file_path:
+             return
+         if not file_path.lower().endswith(".pdf"):
+             file_path += ".pdf"
+         existing_emission = ord_inf.get('emitted_at')
+         mark_as_emitted = not (ord_inf.get('emitted') and existing_emission)
+         if mark_as_emitted:
+             emission_time = datetime.datetime.now()
+diff --git a/main_window.py b/main_window.py
+index 18d207d37106f4fb42d32b155317205c70eb0f6f..2a40040635d363f85c12b8bf6699c79bbb1e3212 100644
+--- a/main_window.py
++++ b/main_window.py
+@@ -2167,238 +2331,252 @@ class MainWindow(QMainWindow):
+         order_date_text = ord_inf.get('date') or "-"
+         sex_text = (pat.get('sex') or '-').upper()
+         hcl_text = (pat.get('hcl') or '-').upper()
+         origin_text = (pat.get('origin') or '-').upper()
+         requester_text = (ord_inf.get('requested_by') or '-').upper()
+         diagnosis_text = (ord_inf.get('diagnosis') or '-').upper()
+         pdf = FPDF('P', 'mm', 'A4')
+         pdf.set_margins(12, 12, 12)
+         pdf.set_auto_page_break(True, margin=14)
+         pdf.add_page()
+         header_image_path = os.path.join("img", "img.png")
+         info_pairs = [
+             (("Paciente", patient_name), ("Edad", age_text)),
+             (("Documento", doc_text.upper() if doc_text else "-"), ("Sexo", sex_text)),
+             (("Historia clínica", hcl_text), ("Fecha emisión", emission_display)),
+             (("Procedencia", origin_text), ("Fecha muestra", order_date_text)),
+             (("Solicitante", requester_text), ("Diagnóstico presuntivo", diagnosis_text)),
+         ]
+ 
+         def draw_patient_info():
+             col_width = (pdf.w - pdf.l_margin - pdf.r_margin) / 2
+ 
+             def render_pair(label, value, x_start, width, start_y):
+                 pdf.set_xy(x_start, start_y)
+                 pdf.set_font("Arial", 'B', 7.2)
+-                pdf.cell(width, 3.4, f"{label.upper()}:", border=0)
++                pdf.cell(width, 3.4, self._ensure_latin1(f"{label.upper()}:"), border=0)
+                 pdf.set_font("Arial", '', 7.2)
+                 pdf.set_xy(x_start, pdf.get_y())
+                 safe_value = str(value) if value not in (None, "") else "-"
+-                pdf.multi_cell(width, 3.6, safe_value, border=0)
++                pdf.multi_cell(width, 3.6, self._ensure_latin1(safe_value), border=0)
+                 return pdf.get_y()
+ 
+             pdf.set_font("Arial", 'B', 8.8)
+             pdf.set_text_color(30, 30, 30)
+-            pdf.cell(0, 5, "Datos del paciente", ln=1)
++            pdf.cell(0, 5, self._ensure_latin1("Datos del paciente"), ln=1)
+             pdf.set_text_color(0, 0, 0)
+             pdf.ln(1)
+             for left, right in info_pairs:
+                 start_y = pdf.get_y()
+                 left_end = render_pair(left[0], left[1], pdf.l_margin, col_width, start_y)
+                 right_end = render_pair(right[0], right[1], pdf.l_margin + col_width, col_width, start_y)
+                 pdf.set_y(max(left_end, right_end) + 1.2)
+ 
+         def draw_page_header():
+             top_y = max(5, pdf.t_margin - 6)
+             header_drawn = False
+             if os.path.exists(header_image_path):
+                 try:
+                     header_width = pdf.w - pdf.l_margin - pdf.r_margin
+                     header_height = 27
+                     pdf.image(header_image_path, x=pdf.l_margin, y=top_y, w=header_width, h=header_height)
+                     pdf.set_y(top_y + header_height + 2)
+                     header_drawn = True
+                 except Exception:
+                     header_drawn = False
+             if not header_drawn:
+                 fallback_logo = self._find_logo_path('center')
+                 if fallback_logo:
+                     try:
+                         pdf.image(fallback_logo, x=(pdf.w - 28) / 2, y=top_y, w=28)
+                         pdf.set_y(top_y + 30)
+                         header_drawn = True
+                     except Exception:
+                         header_drawn = False
+             if not header_drawn:
+                 pdf.set_y(pdf.t_margin)
+                 pdf.set_font("Arial", 'B', 12)
+-                pdf.cell(0, 6, LAB_TITLE, ln=1, align='C')
++                pdf.cell(0, 6, self._ensure_latin1(LAB_TITLE), ln=1, align='C')
+                 pdf.ln(2)
+             draw_patient_info()
+             pdf.ln(1.5)
+ 
+         def ensure_space(required_height):
+             if pdf.get_y() + required_height > pdf.h - pdf.b_margin:
+                 pdf.add_page()
+                 draw_page_header()
+                 return True
+             return False
+ 
+         def wrap_text(text, max_width):
+             if max_width <= 0:
+                 return [str(text)]
+             if text in (None, ""):
+                 text = "-"
+-            text = str(text).replace('\r', ' ')
++            text = self._ensure_latin1(str(text)).replace('\r', ' ')
+             segments = []
+             for part in text.split('\n'):
+                 stripped = part.strip()
+                 if stripped:
+                     segments.append(stripped)
+             if not segments:
+                 segments = [text.strip() or "-"]
+             lines = []
+             for segment in segments:
+                 words = segment.split()
+                 if not words:
+                     lines.append("-")
+                     continue
+                 current = words[0]
+                 for word in words[1:]:
+                     candidate = f"{current} {word}"
+                     if pdf.get_string_width(candidate) <= max_width:
+                         current = candidate
+                     else:
+                         lines.append(current)
+                         current = word
+                 lines.append(current)
+             return lines or ["-"]
+ 
+         def render_table_header(widths, on_new_page=None):
+             header_height = 6
+             if ensure_space(header_height) and on_new_page:
+                 on_new_page()
+                 ensure_space(header_height)
+             pdf.set_font("Arial", 'B', 7.2)
+             pdf.set_text_color(255, 255, 255)
+             pdf.set_fill_color(46, 117, 182)
+             x_start = pdf.l_margin
+             pdf.set_x(x_start)
+             headers = ["Parámetro", "Resultado", "Valores de referencia"]
+             for idx, title in enumerate(headers):
+-                pdf.cell(widths[idx], header_height, title, border=1, align='C', fill=True)
++                pdf.cell(widths[idx], header_height, self._ensure_latin1(title), border=1, align='C', fill=True)
+             pdf.ln(header_height)
+             pdf.set_text_color(0, 0, 0)
+ 
+         def render_table_row(texts, widths, on_new_page):
+             line_height = 3.4
+             padding_x = 1.4
+             padding_y = 0.9
+             pdf.set_font("Arial", '', 6.8)
+             lines_by_cell = []
+             max_lines = 1
+             for idx, text in enumerate(texts):
+                 available = max(widths[idx] - 2 * padding_x, 1)
+                 lines = wrap_text(text, available)
+                 lines_by_cell.append(lines)
+                 if len(lines) > max_lines:
+                     max_lines = len(lines)
+             row_height = max_lines * line_height + 2 * padding_y
+             if ensure_space(row_height):
+                 on_new_page()
+                 render_table_header(widths)
+             x_start = pdf.l_margin
+             y_start = pdf.get_y()
+             pdf.set_draw_color(210, 215, 226)
+             pdf.set_line_width(0.2)
+             for idx, lines in enumerate(lines_by_cell):
+                 cell_width = widths[idx]
+                 x_pos = x_start + sum(widths[:idx])
+                 pdf.set_fill_color(255, 255, 255)
+                 pdf.rect(x_pos, y_start, cell_width, row_height)
+                 text_y = y_start + padding_y
+                 for line in lines:
++                    line = self._ensure_latin1(line)
+                     pdf.set_xy(x_pos + padding_x, text_y)
+                     pdf.cell(cell_width - 2 * padding_x, line_height, line, border=0)
+                     text_y += line_height
+             pdf.set_xy(pdf.l_margin, y_start + row_height)
+ 
+         def render_section_row(label, total_width, widths, on_new_page):
+             section_height = 4.2
+             if ensure_space(section_height + 1):
+                 on_new_page()
+                 render_table_header(widths)
+             pdf.set_font("Arial", 'B', 6.8)
+             pdf.set_fill_color(242, 246, 253)
+             pdf.set_text_color(47, 84, 150)
+-            pdf.cell(total_width, section_height, label, border=1, ln=1, align='L', fill=True)
++            pdf.cell(total_width, section_height, self._ensure_latin1(label), border=1, ln=1, align='L', fill=True)
+             pdf.set_text_color(0, 0, 0)
+ 
+         draw_page_header()
+ 
+         table_total_width = pdf.w - pdf.l_margin - pdf.r_margin
+         column_widths = [table_total_width * 0.38, table_total_width * 0.27, table_total_width * 0.35]
+ 
+         def draw_test_header(title):
+             ensure_space(9)
+             pdf.set_font("Arial", 'B', 8.6)
+             pdf.set_text_color(255, 255, 255)
+             pdf.set_fill_color(46, 117, 182)
+-            pdf.cell(0, 6, title.upper(), ln=1, fill=True)
++            pdf.cell(0, 6, self._ensure_latin1(title.upper()), ln=1, fill=True)
+             pdf.set_text_color(0, 0, 0)
+             pdf.ln(1.2)
+ 
+         for test_name, raw_result, _ in results:
+             structure = self._extract_result_structure(test_name, raw_result)
++            if structure.get("type") == "structured":
++                items = structure.get("items", [])
++                if not any(item.get("type") == "value" for item in items):
++                    continue
++            else:
++                value_text = structure.get("value", "")
++                if isinstance(value_text, str):
++                    if value_text.strip() == "":
++                        continue
++                elif self._is_blank_result(value_text):
++                    continue
+             draw_test_header(test_name)
++
+             def on_new_page():
+                 draw_test_header(test_name)
++
+             if structure.get("type") == "structured":
+                 render_table_header(column_widths, on_new_page)
+                 for item in structure.get("items", []):
+                     if item.get("type") == "section":
+                         render_section_row(item.get("label", ""), sum(column_widths), column_widths, on_new_page)
+                         continue
+                     row_texts = [
+                         item.get('label', ''),
+                         item.get('value', '-'),
+                         item.get('reference') or '-'
+                     ]
+                     render_table_row(row_texts, column_widths, on_new_page)
+             else:
+-                value_text = structure.get("value", "-")
++                text_value = structure.get("value", "")
+                 ensure_space(6)
+                 pdf.set_font("Arial", '', 7)
+-                pdf.multi_cell(0, 4, str(value_text))
++                pdf.multi_cell(0, 4, self._ensure_latin1(text_value))
+             pdf.ln(2)
+ 
+         if ord_inf.get('observations'):
+             ensure_space(8)
+             pdf.set_font("Arial", 'B', 7.4)
+             pdf.cell(0, 4.2, "Observaciones", ln=1)
+             pdf.set_font("Arial", '', 6.9)
+-            pdf.multi_cell(0, 3.6, ord_inf['observations'])
++            pdf.multi_cell(0, 3.6, self._ensure_latin1(ord_inf['observations']))
+             pdf.ln(1.5)
+ 
+         try:
+             pdf.output(file_path)
+         except Exception as e:
+             QMessageBox.warning(self, "Error", f"No se pudo guardar el PDF:\n{e}")
+             return
+         if mark_as_emitted:
+             self.labdb.mark_order_emitted(order_id, emission_timestamp)
+         QMessageBox.information(self, "Informe emitido", f"Reporte guardado en:\n{file_path}")
+         self.populate_completed_orders()
+         self.output_text.clear()
+ 
+ 
+     def export_excel(self):
+         # Exportar todos los resultados a un archivo CSV (Excel puede abrirlo)
+         options = QFileDialog.Options()
+         file_path, _ = QFileDialog.getSaveFileName(self, "Exportar datos", "", "Archivo CSV (*.csv)", options=options)
+         if not file_path:
+             return
+         if not file_path.lower().endswith(".csv"):
+             file_path += ".csv"
+         self.labdb.cur.execute("""
+             SELECT p.first_name, p.last_name, p.doc_type, p.doc_number, t.name, ot.result, o.date, o.requested_by, o.diagnosis, o.age_years
+             FROM order_tests ot
+diff --git a/main_window.py b/main_window.py
+index 18d207d37106f4fb42d32b155317205c70eb0f6f..2a40040635d363f85c12b8bf6699c79bbb1e3212 100644
+--- a/main_window.py
++++ b/main_window.py
+@@ -2455,55 +2633,96 @@ class MainWindow(QMainWindow):
+         controls_layout.addSpacing(10)
+         self.view_activity_btn = QPushButton("Mostrar registro")
+         self.export_activity_pdf_btn = QPushButton("Exportar PDF")
+         self.export_activity_csv_btn = QPushButton("Exportar CSV")
+         controls_layout.addWidget(self.view_activity_btn)
+         controls_layout.addWidget(self.export_activity_pdf_btn)
+         controls_layout.addWidget(self.export_activity_csv_btn)
+         controls_layout.addStretch()
+         layout.addLayout(controls_layout)
+         self.activity_caption = QLabel()
+         self.activity_caption.setStyleSheet("font-weight: bold;")
+         layout.addWidget(self.activity_caption)
+         self.activity_table = QTableWidget(0, 7)
+         self.activity_table.setHorizontalHeaderLabels([
+             "Fecha",
+             "Orden",
+             "Paciente",
+             "Documento",
+             "Edad",
+             "Prueba",
+             "Resultado"
+         ])
+         self.activity_table.setAlternatingRowColors(True)
+         self.activity_table.horizontalHeader().setStretchLastSection(True)
+         layout.addWidget(self.activity_table)
++        history_group = QGroupBox("Historial por DNI")
++        history_layout = QVBoxLayout(history_group)
++        history_search_layout = QHBoxLayout()
++        history_search_layout.addWidget(QLabel("DNI:"))
++        self.history_doc_input = QLineEdit()
++        self.history_doc_input.setPlaceholderText("Ingrese DNI")
++        history_search_layout.addWidget(self.history_doc_input)
++        self.history_search_btn = QPushButton("Buscar")
++        history_search_layout.addWidget(self.history_search_btn)
++        self.history_open_btn = QPushButton("Ver en emisión")
++        self.history_open_btn.setEnabled(False)
++        history_search_layout.addWidget(self.history_open_btn)
++        history_search_layout.addStretch()
++        history_layout.addLayout(history_search_layout)
++        history_headers = [
++            "Fecha",
++            "Orden",
++            "Paciente",
++            "Documento",
++            "Edad",
++            "Hematología",
++            "Bioquímica",
++            "Micro/Parasitología",
++            "Otros exámenes",
++            "Emitido"
++        ]
++        self.history_table = QTableWidget(0, len(history_headers))
++        self.history_table.setHorizontalHeaderLabels(history_headers)
++        self.history_table.setSelectionBehavior(QTableWidget.SelectRows)
++        self.history_table.setSelectionMode(QTableWidget.SingleSelection)
++        self.history_table.setAlternatingRowColors(True)
++        self.history_table.setWordWrap(True)
++        self.history_table.verticalHeader().setVisible(False)
++        self.history_table.horizontalHeader().setStretchLastSection(True)
++        history_layout.addWidget(self.history_table)
++        layout.addWidget(history_group)
++        self._history_results = []
+         self.range_combo.currentIndexChanged.connect(self._update_range_controls)
+         self.view_activity_btn.clicked.connect(self.load_activity_summary)
+         self.export_activity_pdf_btn.clicked.connect(lambda: self.export_activity_record("pdf"))
+         self.export_activity_csv_btn.clicked.connect(lambda: self.export_activity_record("csv"))
+         self._update_range_controls()
++        self.history_doc_input.returnPressed.connect(self.search_patient_history)
++        self.history_search_btn.clicked.connect(self.search_patient_history)
++        self.history_open_btn.clicked.connect(self.open_history_order_from_analysis)
++        self.history_table.itemSelectionChanged.connect(self._on_history_selection_changed)
+     def refresh_statistics(self):
+         stats = self.labdb.get_statistics()
+         text = (f"Pacientes registrados: {stats['total_patients']}\n"
+                 f"Órdenes realizadas: {stats['total_orders']}\n"
+                 f"Pruebas realizadas: {stats['total_tests_conducted']}")
+         self.stats_label.setText(text)
+         # Llenar tabla de categorías
+         self.stats_table.setRowCount(0)
+         for (cat, count) in stats['by_category']:
+             row = self.stats_table.rowCount()
+             self.stats_table.insertRow(row)
+             self.stats_table.setItem(row, 0, QTableWidgetItem(cat))
+             self.stats_table.setItem(row, 1, QTableWidgetItem(str(count)))
+         self.load_activity_summary()
+ 
+     def _update_range_controls(self):
+         if not hasattr(self, 'range_combo'):
+             return
+         is_custom = self.range_combo.currentIndex() == 4
+         if hasattr(self, 'start_date_edit'):
+             self.start_date_edit.setEnabled(is_custom)
+         if hasattr(self, 'end_date_edit'):
+             self.end_date_edit.setEnabled(is_custom)
+         if not is_custom and hasattr(self, 'start_date_edit') and hasattr(self, 'end_date_edit'):
+             today = QDate.currentDate()
+diff --git a/main_window.py b/main_window.py
+index 18d207d37106f4fb42d32b155317205c70eb0f6f..2a40040635d363f85c12b8bf6699c79bbb1e3212 100644
+--- a/main_window.py
++++ b/main_window.py
+@@ -2540,199 +2759,401 @@ class MainWindow(QMainWindow):
+             description = f"Últimos 30 días ({start_date.strftime('%d/%m/%Y')} al {end_date.strftime('%d/%m/%Y')})"
+         else:  # Rango personalizado
+             if hasattr(self, 'start_date_edit') and hasattr(self, 'end_date_edit'):
+                 start_q = self.start_date_edit.date()
+                 end_q = self.end_date_edit.date()
+                 if start_q.isValid():
+                     start_date = datetime.date(start_q.year(), start_q.month(), start_q.day())
+                 if end_q.isValid():
+                     end_date = datetime.date(end_q.year(), end_q.month(), end_q.day())
+             if end_date < start_date:
+                 start_date, end_date = end_date, start_date
+             description = f"Del {start_date.strftime('%d/%m/%Y')} al {end_date.strftime('%d/%m/%Y')}"
+         start_dt = datetime.datetime.combine(start_date, datetime.time.min)
+         end_dt = datetime.datetime.combine(end_date, datetime.time.max)
+         return start_dt, end_dt, description
+ 
+     def load_activity_summary(self):
+         if not hasattr(self, 'activity_table'):
+             return
+         start_dt, end_dt, description = self._get_selected_range()
+         rows = self.labdb.get_results_in_range(
+             start_dt.strftime("%Y-%m-%d %H:%M:%S"),
+             end_dt.strftime("%Y-%m-%d %H:%M:%S")
+         )
+         activity_data = []
+-        for order_id, date_str, first, last, doc_type, doc_number, age_years, test_name, result in rows:
++        for order_id, date_str, first, last, doc_type, doc_number, age_years, test_name, category, result in rows:
+             try:
+                 order_dt = datetime.datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
+                 date_display = order_dt.strftime("%d/%m/%Y %H:%M")
+             except Exception:
+                 date_display = date_str or "-"
+             patient_name = " ".join(part for part in [(first or "").upper(), (last or "").upper()] if part).strip() or "-"
+             doc_text = " ".join(part for part in (doc_type, doc_number) if part).strip() or "-"
+             age_display = str(age_years) if age_years not in (None, "") else "-"
+             result_text = self._format_result_for_export(test_name, result).replace('\n', ' ')
++            if result_text.strip() == "":
++                continue
+             activity_data.append({
+                 "order_id": order_id,
+                 "date": date_display,
+                 "patient": patient_name,
+                 "document": doc_text,
+                 "age": age_display,
+                 "test": test_name,
+-                "result": result_text
++                "result": result_text,
++                "category": category,
++                "emitted": None,
++                "emitted_at": None
+             })
+         self._activity_cache = {
+             "data": activity_data,
+             "description": description,
+             "start": start_dt,
+             "end": end_dt
+         }
+         self.activity_table.setRowCount(len(activity_data))
+         for row_idx, item in enumerate(activity_data):
+             self.activity_table.setItem(row_idx, 0, QTableWidgetItem(item["date"]))
+             order_item = QTableWidgetItem(str(item["order_id"]))
+             order_item.setTextAlignment(Qt.AlignCenter)
+             self.activity_table.setItem(row_idx, 1, order_item)
+             self.activity_table.setItem(row_idx, 2, QTableWidgetItem(item["patient"]))
+             self.activity_table.setItem(row_idx, 3, QTableWidgetItem(item["document"]))
+             age_item = QTableWidgetItem(item["age"])
+             age_item.setTextAlignment(Qt.AlignCenter)
+             self.activity_table.setItem(row_idx, 4, age_item)
+             self.activity_table.setItem(row_idx, 5, QTableWidgetItem(item["test"]))
+             self.activity_table.setItem(row_idx, 6, QTableWidgetItem(item["result"]))
+         if hasattr(self, 'activity_caption'):
+             self.activity_caption.setText(
+-                f"Registro de pruebas: {description} — {len(activity_data)} resultado(s)"
++                f"Registro de pruebas: {description} - {len(activity_data)} resultado(s)"
+             )
+ 
+     def export_activity_record(self, fmt):
+         if fmt not in {"pdf", "csv"}:
+             return
+         if not getattr(self, '_activity_cache', None):
+             self.load_activity_summary()
+         cache = getattr(self, '_activity_cache', {"data": [], "description": ""})
+         data = cache.get("data", [])
+         if not data:
+             QMessageBox.information(self, "Sin datos", "No hay registros para el período seleccionado.")
+             return
+         description = cache.get("description", "")
+         if fmt == "csv":
+             file_path, _ = QFileDialog.getSaveFileName(
+                 self,
+                 "Exportar registro",
+                 "registro.csv",
+                 "Archivo CSV (*.csv)"
+             )
+             if not file_path:
+                 return
+             if not file_path.lower().endswith(".csv"):
+                 file_path += ".csv"
+             try:
+                 with open(file_path, 'w', encoding='utf-8') as f:
+                     f.write("Fecha,Orden,Paciente,Documento,Edad,Prueba,Resultado\n")
+                     for item in data:
+                         result_clean = item["result"].replace('"', "'")
+                         line = (
+                             f"{item['date']},{item['order_id']},\"{item['patient']}\"," \
+                             f"{item['document']},{item['age']},\"{item['test']}\",\"{result_clean}\"\n"
+                         )
+                         f.write(line)
+             except Exception as exc:
+                 QMessageBox.warning(self, "Error", f"No se pudo exportar el archivo CSV:\n{exc}")
+                 return
+             QMessageBox.information(self, "Exportado", f"Registro guardado en:\n{file_path}")
+             return
++        aggregated = self._aggregate_results_by_order(data)
++        if not aggregated:
++            QMessageBox.information(self, "Sin datos", "No hay resultados con información para exportar en PDF.")
++            return
+         file_path, _ = QFileDialog.getSaveFileName(
+             self,
+             "Exportar registro",
+             "registro.pdf",
+             "Archivos PDF (*.pdf)"
+         )
+         if not file_path:
+             return
+         if not file_path.lower().endswith(".pdf"):
+             file_path += ".pdf"
+         pdf = FPDF('L', 'mm', 'A4')
+         pdf.set_margins(12, 12, 12)
+         pdf.set_auto_page_break(True, margin=14)
+         pdf.add_page()
+         pdf.set_font("Arial", 'B', 12)
+-        pdf.cell(0, 8, LAB_TITLE, ln=1, align='C')
++        pdf.cell(0, 8, self._ensure_latin1(LAB_TITLE), ln=1, align='C')
+         pdf.set_font("Arial", '', 9)
+-        pdf.cell(0, 6, f"Registro de resultados — {description}", ln=1, align='C')
++        pdf.cell(0, 6, self._ensure_latin1(f"Registro de resultados - {description}"), ln=1, align='C')
+         pdf.ln(2)
+-        headers = ["Fecha", "Orden", "Paciente", "Documento", "Edad", "Prueba", "Resultado"]
+-        column_widths = [35, 18, 60, 40, 16, 50, 64]
++        headers = [
++            "Fecha",
++            "Orden",
++            "Paciente",
++            "Documento",
++            "Edad",
++            "Hematología",
++            "Bioquímica",
++            "Micro/Parasitología",
++            "Otros exámenes",
++            "Emitido"
++        ]
++        column_widths = [27, 12, 44, 28, 12, 33, 33, 33, 30, 18]
+         pdf.set_fill_color(220, 220, 220)
+         pdf.set_font("Arial", 'B', 8.5)
+         for header, width in zip(headers, column_widths):
+-            pdf.cell(width, 6, header, border=1, align='C', fill=True)
++            pdf.cell(width, 6, self._ensure_latin1(header), border=1, align='C', fill=True)
+         pdf.ln(6)
+ 
+         def ensure_space(required_height):
+             if pdf.get_y() + required_height > pdf.h - pdf.b_margin:
+                 pdf.add_page()
+                 pdf.set_font("Arial", 'B', 12)
+-                pdf.cell(0, 8, LAB_TITLE, ln=1, align='C')
++                pdf.cell(0, 8, self._ensure_latin1(LAB_TITLE), ln=1, align='C')
+                 pdf.set_font("Arial", '', 9)
+-                pdf.cell(0, 6, f"Registro de resultados — {description}", ln=1, align='C')
++                pdf.cell(0, 6, self._ensure_latin1(f"Registro de resultados - {description}"), ln=1, align='C')
+                 pdf.ln(2)
+                 pdf.set_fill_color(220, 220, 220)
+                 pdf.set_font("Arial", 'B', 8.5)
+                 for header, width in zip(headers, column_widths):
+-                    pdf.cell(width, 6, header, border=1, align='C', fill=True)
++                    pdf.cell(width, 6, self._ensure_latin1(header), border=1, align='C', fill=True)
+                 pdf.ln(6)
+-                pdf.set_font("Arial", '', 7.8)
++                pdf.set_font("Arial", '', 7.4)
+ 
+-        pdf.set_font("Arial", '', 7.8)
+-        for item in data:
++        def wrap_cell_text(text, available_width):
++            sanitized = self._ensure_latin1(str(text) if text not in (None, "") else "-")
++            segments = []
++            for part in sanitized.split('\n'):
++                part = part.strip()
++                if part:
++                    segments.append(part)
++            if not segments:
++                segments = [sanitized.strip() or "-"]
++            lines = []
++            for segment in segments:
++                words = segment.split()
++                if not words:
++                    lines.append("-")
++                    continue
++                current = words[0]
++                for word in words[1:]:
++                    candidate = f"{current} {word}"
++                    if pdf.get_string_width(candidate) <= max(available_width, 1):
++                        current = candidate
++                    else:
++                        lines.append(current)
++                        current = word
++                lines.append(current)
++            return lines or ["-"]
++
++        def render_row(texts):
++            line_height = 3.8
++            padding_x = 1.4
++            padding_y = 1.0
++            cell_lines = []
++            max_lines = 1
++            for idx, text in enumerate(texts):
++                available = max(column_widths[idx] - 2 * padding_x, 1)
++                lines = wrap_cell_text(text, available)
++                cell_lines.append(lines)
++                if len(lines) > max_lines:
++                    max_lines = len(lines)
++            row_height = max_lines * line_height + 2 * padding_y
++            ensure_space(row_height)
++            x_start = pdf.l_margin
++            y_start = pdf.get_y()
++            pdf.set_draw_color(210, 215, 226)
++            pdf.set_line_width(0.2)
++            for idx, lines in enumerate(cell_lines):
++                cell_width = column_widths[idx]
++                x_pos = x_start + sum(column_widths[:idx])
++                pdf.rect(x_pos, y_start, cell_width, row_height)
++                text_y = y_start + padding_y
++                for line in lines:
++                    pdf.set_xy(x_pos + padding_x, text_y)
++                    pdf.cell(cell_width - 2 * padding_x, line_height, line, border=0)
++                    text_y += line_height
++            pdf.set_xy(pdf.l_margin, y_start + row_height)
++
++        pdf.set_font("Arial", '', 7.4)
++
++        def format_group(entry, key):
++            values = entry.get("groups", {}).get(key, [])
++            return "\n".join(values) if values else "-"
++
++        for entry in aggregated:
+             cells = [
+-                item["date"],
+-                str(item["order_id"]),
+-                item["patient"],
+-                item["document"],
+-                item["age"],
+-                item["test"],
+-                item["result"],
++                entry.get("date", "-"),
++                str(entry.get("order_id", "-")),
++                entry.get("patient", "-"),
++                entry.get("document", "-"),
++                entry.get("age", "-"),
++                format_group(entry, "hematology"),
++                format_group(entry, "biochemistry"),
++                format_group(entry, "micro_parasito"),
++                format_group(entry, "others"),
++                self._format_emission_status(entry.get("emitted"), entry.get("emitted_at"))
+             ]
+-            ensure_space(8)
+-            y_start = pdf.get_y()
+-            x_start = pdf.get_x()
+-            max_y = y_start
+-            for width, text in zip(column_widths, cells):
+-                pdf.set_xy(x_start, y_start)
+-                pdf.multi_cell(width, 5, str(text) if text not in (None, "") else "-", border=1)
+-                x_start += width
+-                max_y = max(max_y, pdf.get_y())
+-            pdf.set_y(max_y)
++            render_row(cells)
+         try:
+             pdf.output(file_path)
+         except Exception as exc:
+             QMessageBox.warning(self, "Error", f"No se pudo generar el PDF:\n{exc}")
+             return
+         QMessageBox.information(self, "Exportado", f"Registro guardado en:\n{file_path}")
++
++    def _clear_history_table(self):
++        if hasattr(self, 'history_table'):
++            self.history_table.setRowCount(0)
++        self._history_results = []
++        if hasattr(self, 'history_open_btn'):
++            self.history_open_btn.setEnabled(False)
++
++    def _on_history_selection_changed(self):
++        if not hasattr(self, 'history_table'):
++            return
++        selection = self.history_table.selectionModel()
++        has_selection = bool(selection.selectedRows()) if selection else False
++        if hasattr(self, 'history_open_btn'):
++            self.history_open_btn.setEnabled(has_selection)
++
++    def search_patient_history(self):
++        if not hasattr(self, 'history_table'):
++            return
++        doc_number = self.history_doc_input.text().strip() if hasattr(self, 'history_doc_input') else ""
++        if doc_number == "":
++            QMessageBox.warning(self, "DNI requerido", "Ingrese un DNI para realizar la búsqueda.")
++            return
++        if not doc_number.isdigit():
++            QMessageBox.warning(self, "Formato inválido", "El DNI debe contener solo números.")
++            return
++        self._clear_history_table()
++        rows = self.labdb.get_patient_history_by_document(doc_number, "DNI")
++        records = []
++        for row in rows:
++            (
++                order_id,
++                date_str,
++                test_name,
++                raw_result,
++                category,
++                first_name,
++                last_name,
++                doc_type,
++                doc_value,
++                age_years,
++                emitted,
++                emitted_at
++            ) = row
++            try:
++                order_dt = datetime.datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
++                date_display = order_dt.strftime("%d/%m/%Y %H:%M")
++            except Exception:
++                date_display = date_str or "-"
++            patient_name = " ".join(part for part in [(first_name or "").upper(), (last_name or "").upper()] if part).strip() or "-"
++            doc_text = " ".join(part for part in (doc_type, doc_value) if part).strip() or "-"
++            age_display = str(age_years) if age_years not in (None, "") else "-"
++            result_text = self._format_result_for_export(test_name, raw_result).replace('\n', ' ')
++            if result_text.strip() == "":
++                continue
++            records.append({
++                "order_id": order_id,
++                "date": date_display,
++                "patient": patient_name,
++                "document": doc_text,
++                "age": age_display,
++                "test": test_name,
++                "result": result_text,
++                "category": category,
++                "emitted": emitted,
++                "emitted_at": emitted_at
++            })
++        aggregated = self._aggregate_results_by_order(records)
++        self._history_results = aggregated
++        self.history_table.setRowCount(len(aggregated))
++        headers = [
++            "date",
++            "order_id",
++            "patient",
++            "document",
++            "age",
++            "hematology",
++            "biochemistry",
++            "micro_parasito",
++            "others",
++            "emitted"
++        ]
++        for row_idx, entry in enumerate(aggregated):
++            values = [
++                entry.get("date", "-"),
++                str(entry.get("order_id", "-")),
++                entry.get("patient", "-"),
++                entry.get("document", "-"),
++                entry.get("age", "-"),
++                "\n".join(entry.get("groups", {}).get("hematology", [])) or "-",
++                "\n".join(entry.get("groups", {}).get("biochemistry", [])) or "-",
++                "\n".join(entry.get("groups", {}).get("micro_parasito", [])) or "-",
++                "\n".join(entry.get("groups", {}).get("others", [])) or "-",
++                self._format_emission_status(entry.get("emitted"), entry.get("emitted_at"))
++            ]
++            for col_idx, value in enumerate(values):
++                item = QTableWidgetItem(str(value))
++                if headers[col_idx] in {"order_id", "age"}:
++                    item.setTextAlignment(Qt.AlignCenter)
++                self.history_table.setItem(row_idx, col_idx, item)
++        if not aggregated:
++            QMessageBox.information(self, "Sin resultados", "No se encontró historial con resultados registrados para este DNI.")
++        self._on_history_selection_changed()
++
++    def open_history_order_from_analysis(self):
++        if not hasattr(self, 'history_table'):
++            return
++        selection = self.history_table.selectionModel()
++        if not selection:
++            return
++        indexes = selection.selectedRows()
++        if not indexes:
++            QMessageBox.information(self, "Sin selección", "Seleccione una orden para abrirla en la emisión.")
++            return
++        row = indexes[0].row()
++        history_items = getattr(self, '_history_results', [])
++        if row >= len(history_items):
++            return
++        order_id = history_items[row].get("order_id")
++        if not order_id:
++            QMessageBox.warning(self, "Orden no disponible", "No se pudo determinar el número de orden seleccionado.")
++            return
++        if hasattr(self, 'include_emitted_checkbox'):
++            self.include_emitted_checkbox.setChecked(True)
++        self.populate_completed_orders()
++        self._select_order_in_combo(self.combo_completed, order_id)
++        self.display_selected_result()
++        self.stack.setCurrentWidget(self.page_emitir)
+     def init_config_page(self):
+         layout = QVBoxLayout(self.page_config)
+         info_label = QLabel("Crear nuevo usuario:")
+         layout.addWidget(info_label)
+         form_layout = QFormLayout()
+         self.new_user_input = QLineEdit(); form_layout.addRow("Usuario:", self.new_user_input)
+         self.new_pass_input = QLineEdit(); self.new_pass_input.setEchoMode(QLineEdit.Password)
+         form_layout.addRow("Contraseña:", self.new_pass_input)
+         self.role_input = QComboBox(); self.role_input.addItems(["Administrador", "Superusuario"])
+         form_layout.addRow("Rol:", self.role_input)
+         layout.addLayout(form_layout)
+         btn_create = QPushButton("Crear Usuario")
+         layout.addWidget(btn_create)
+         btn_create.clicked.connect(self.create_user)
+     def create_user(self):
+         username = self.new_user_input.text().strip()
+         password = self.new_pass_input.text().strip()
+         role_text = self.role_input.currentText()
+         role = "admin" if role_text == "Administrador" else "super"
+         if username == "" or password == "":
+             QMessageBox.warning(self, "Campos vacíos", "Ingrese nombre de usuario y contraseña.")
+             return
+         success = self.labdb.create_user(username, password, role)
+         if success:
+             QMessageBox.information(self, "Usuario creado", f"Usuario '{username}' creado exitosamente.")
