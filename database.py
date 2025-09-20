@@ -110,7 +110,7 @@ class LabDB:
                     "PSA (ELISA)"
                 ],
                 "PRUEBAS RÁPIDAS": [
-                    "HCG (Prueba de embarazo en orina)", "VIH (Prueba rápida)", "Sífilis (Prueba rápida)",
+                    "BHCG (Prueba de embarazo en sangre)", "VIH (Prueba rápida)", "Sífilis (Prueba rápida)",
                     "VIH/Sífilis (Prueba combinada)", "Hepatitis A (Prueba rápida)", "Hepatitis B (Prueba rápida)",
                     "PSA (Prueba rápida)", "Sangre oculta en heces (Prueba rápida)", "Helicobacter pylori (Prueba rápida)",
                     "Covid-19 (Prueba antigénica)", "Covid-19 (Prueba serológica)", "Dengue NS1/IgM/IgG (Prueba rápida)"
@@ -122,7 +122,7 @@ class LabDB:
                 "MICROBIOLOGÍA": [
                     "Baciloscopía", "Coloración de Gram", "Examen directo (hongos/KOH)",
                     "Urocultivo", "Coprocultivo", "Cultivo de Neisseria gonorrhoeae",
-                    "Cultivo de Campylobacter spp.", "Cultivo de otras secreciones",
+                    "Cultivo de Campylobacter spp.", "Cultivo de otras secreciones", "Cultivo de secreción vaginal",
                     "Identificación bioquímica", "Antibiograma", "Frotis para Bartonella"
                 ],
                 "MICROSCOPÍA": [
@@ -141,6 +141,12 @@ class LabDB:
                 for test in tests:
                     self.cur.execute("INSERT INTO tests(name, category) VALUES (?,?)", (test, cat))
             self.conn.commit()
+        # Ajustes posteriores para bases de datos existentes
+        self._ensure_test_renamed(
+            "HCG (Prueba de embarazo en orina)",
+            "BHCG (Prueba de embarazo en sangre)"
+        )
+        self._ensure_test_exists("Cultivo de secreción vaginal", "MICROBIOLOGÍA")
         # Cargar mapa de pruebas (nombre -> id)
         self.cur.execute("SELECT id, name FROM tests")
         for tid, name in self.cur.fetchall():
@@ -164,6 +170,8 @@ class LabDB:
         self.cur.execute("SELECT * FROM patients WHERE doc_type=? AND doc_number=?", (doc_type, doc_number))
         return self.cur.fetchone()
     def add_or_update_patient(self, doc_type, doc_number, first_name, last_name, birth_date, sex, origin, hcl, height, weight, blood_pressure):
+        first_name = first_name.upper() if first_name else first_name
+        last_name = last_name.upper() if last_name else last_name
         existing = self.find_patient(doc_type, doc_number)
         if existing:
             pid = existing[0]
@@ -210,20 +218,29 @@ class LabDB:
             ORDER BY o.date ASC, o.id ASC
         """)
         return self.cur.fetchall()
-    def get_completed_orders(self):
-        self.cur.execute("""
-            SELECT o.id, p.first_name, p.last_name, o.date, p.doc_type, p.doc_number
-            FROM orders o
-            JOIN patients p ON o.patient_id=p.id
-            WHERE o.completed=1 AND (o.emitted IS NULL OR o.emitted=0)
-            ORDER BY o.date ASC, o.id ASC
-        """)
+    def get_completed_orders(self, include_emitted=False):
+        if include_emitted:
+            self.cur.execute("""
+                SELECT o.id, p.first_name, p.last_name, o.date, p.doc_type, p.doc_number, o.emitted, o.emitted_at
+                FROM orders o
+                JOIN patients p ON o.patient_id=p.id
+                WHERE o.completed=1
+                ORDER BY o.date ASC, o.id ASC
+            """)
+        else:
+            self.cur.execute("""
+                SELECT o.id, p.first_name, p.last_name, o.date, p.doc_type, p.doc_number, o.emitted, o.emitted_at
+                FROM orders o
+                JOIN patients p ON o.patient_id=p.id
+                WHERE o.completed=1 AND (o.emitted IS NULL OR o.emitted=0)
+                ORDER BY o.date ASC, o.id ASC
+            """)
         return self.cur.fetchall()
     def get_order_details(self, order_id):
         self.cur.execute("""
             SELECT p.first_name, p.last_name, p.doc_type, p.doc_number, p.birth_date, p.sex, p.origin, p.hcl,
                    o.date, o.observations, o.requested_by, o.diagnosis, o.age_years, o.emitted, o.emitted_at,
-                   t.name, ot.result
+                   t.name, ot.result, t.category
             FROM orders o
             JOIN patients p ON o.patient_id = p.id
             JOIN order_tests ot ON ot.order_id = o.id
@@ -233,9 +250,9 @@ class LabDB:
         rows = self.cur.fetchall()
         if not rows:
             return None
-        first_name, last_name, doc_type, doc_number, birth_date, sex, origin, hcl, date, obs, req_by, diag, age_years, emitted, emitted_at, _, _ = rows[0]
+        first_name, last_name, doc_type, doc_number, birth_date, sex, origin, hcl, date, obs, req_by, diag, age_years, emitted, emitted_at, _, _, _ = rows[0]
         patient_info = {
-            "name": f"{first_name} {last_name}",
+            "name": f"{(first_name or '').upper()} {(last_name or '').upper()}".strip(),
             "doc_type": doc_type,
             "doc_number": doc_number,
             "birth_date": birth_date,
@@ -252,7 +269,7 @@ class LabDB:
             "emitted": emitted,
             "emitted_at": emitted_at,
         }
-        results = [(row[15], row[16]) for row in rows]
+        results = [(row[15], row[16], row[17]) for row in rows]
         return {"patient": patient_info, "order": order_info, "results": results}
     def save_results(self, order_id, results_dict):
         for name, result in results_dict.items():
@@ -275,7 +292,12 @@ class LabDB:
         return completed_flag
     def mark_order_emitted(self, order_id, emitted_at):
         self.cur.execute(
-            "UPDATE orders SET emitted=1, emitted_at=? WHERE id=?",
+            """
+            UPDATE orders
+            SET emitted=1,
+                emitted_at=COALESCE(emitted_at, ?)
+            WHERE id=?
+            """,
             (emitted_at, order_id)
         )
         self.conn.commit()
@@ -300,4 +322,56 @@ class LabDB:
             if default_value is not None:
                 alter_sql += f" DEFAULT '{default_value}'"
             self.cur.execute(alter_sql)
+            self.conn.commit()
+
+    def get_all_tests(self):
+        self.cur.execute("SELECT name, category FROM tests ORDER BY category, name")
+        return self.cur.fetchall()
+
+    def get_tests_for_order(self, order_id):
+        self.cur.execute("""
+            SELECT t.name FROM order_tests ot
+            JOIN tests t ON ot.test_id = t.id
+            WHERE ot.order_id=?
+        """, (order_id,))
+        return [row[0] for row in self.cur.fetchall()]
+
+    def add_tests_to_order(self, order_id, test_names):
+        if not test_names:
+            return []
+        self.cur.execute("""
+            SELECT t.name FROM order_tests ot
+            JOIN tests t ON ot.test_id = t.id
+            WHERE ot.order_id=?
+        """, (order_id,))
+        existing = {row[0] for row in self.cur.fetchall()}
+        added = []
+        for name in test_names:
+            if name not in self.test_map:
+                self.cur.execute("SELECT id FROM tests WHERE name=?", (name,))
+                row = self.cur.fetchone()
+                if row:
+                    self.test_map[name] = row[0]
+            if name in self.test_map and name not in existing:
+                test_id = self.test_map[name]
+                self.cur.execute(
+                    "INSERT INTO order_tests(order_id, test_id, result) VALUES (?,?,?)",
+                    (order_id, test_id, "")
+                )
+                added.append(name)
+        if added:
+            self.cur.execute("UPDATE orders SET completed=0 WHERE id=?", (order_id,))
+        self.conn.commit()
+        return added
+
+    def _ensure_test_renamed(self, old_name, new_name):
+        if old_name == new_name:
+            return
+        self.cur.execute("UPDATE tests SET name=? WHERE name=?", (new_name, old_name))
+        self.conn.commit()
+
+    def _ensure_test_exists(self, name, category):
+        self.cur.execute("SELECT id FROM tests WHERE name=?", (name,))
+        if not self.cur.fetchone():
+            self.cur.execute("INSERT INTO tests(name, category) VALUES (?,?)", (name, category))
             self.conn.commit()

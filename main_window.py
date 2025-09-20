@@ -6,7 +6,7 @@ import os
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout,
                              QStackedWidget, QFormLayout, QScrollArea, QGroupBox, QComboBox,
                              QLineEdit, QTextEdit, QTableWidget, QTableWidgetItem, QFileDialog, QMessageBox, QCheckBox,
-                             QDateEdit, QRadioButton, QButtonGroup)
+                             QDateEdit, QRadioButton, QButtonGroup, QDialog, QDialogButtonBox, QListWidget, QListWidgetItem)
 from PyQt5.QtCore import QDate, QDateTime, Qt, QTimer
 from fpdf import FPDF  # Asegúrese de tener fpdf instalado (pip install fpdf)
 
@@ -197,6 +197,56 @@ SEDIMENTO_FIELDS = [
     {"key": "otros_hallazgos", "label": "Otros hallazgos", "type": "text_area", "optional": True}
 ]
 
+def build_bool_observation_template(positive_text="Positivo", negative_text="Negativo", reference_text="Negativo"):
+    return {
+        "fields": [
+            {
+                "key": "resultado",
+                "label": "Resultado",
+                "type": "bool",
+                "positive_text": positive_text,
+                "negative_text": negative_text,
+                "reference": reference_text
+            },
+            {
+                "key": "observaciones",
+                "label": "Observaciones",
+                "type": "text_area",
+                "optional": True,
+                "placeholder": "Observaciones (opcional)"
+            }
+        ]
+    }
+
+CULTIVO_SECRECION_FIELDS = [
+    {"type": "section", "label": "Test de aminas"},
+    {
+        "key": "test_aminas",
+        "label": "Resultado",
+        "type": "bool",
+        "positive_text": "Positivo",
+        "negative_text": "Negativo",
+        "reference": "Negativo"
+    },
+    {"type": "section", "label": "Examen directo"},
+    {"key": "directo_celulas", "label": "Células por campo"},
+    {"key": "directo_leucocitos", "label": "Leucocitos por campo"},
+    {"key": "directo_hematies", "label": "Hematíes por campo"},
+    {"key": "directo_germenes", "label": "Gérmenes por campo"},
+    {"type": "section", "label": "Tinción de Gram"},
+    {"key": "gram_celulas", "label": "Células por campo"},
+    {"key": "gram_leucocitos", "label": "Leucocitos por campo"},
+    {"key": "gram_bacilos", "label": "Bacilos de Döderlein"},
+    {"key": "gram_bacterias", "label": "Bacterias / otros gérmenes"},
+    {
+        "key": "observaciones",
+        "label": "Observaciones",
+        "type": "text_area",
+        "optional": True,
+        "placeholder": "Observaciones relevantes"
+    }
+]
+
 TEST_TEMPLATES = {
     "Hemograma manual": {
         "fields": copy.deepcopy(HEMOGRAM_BASE_FIELDS),
@@ -284,6 +334,60 @@ TEST_TEMPLATES = {
         ]
     }
 }
+
+RAPID_TEST_NAMES = [
+    "BHCG (Prueba de embarazo en sangre)",
+    "VIH (Prueba rápida)",
+    "Sífilis (Prueba rápida)",
+    "VIH/Sífilis (Prueba combinada)",
+    "Hepatitis A (Prueba rápida)",
+    "Hepatitis B (Prueba rápida)",
+    "PSA (Prueba rápida)",
+    "Sangre oculta en heces (Prueba rápida)",
+    "Helicobacter pylori (Prueba rápida)",
+    "Covid-19 (Prueba antigénica)",
+    "Covid-19 (Prueba serológica)",
+    "Dengue NS1/IgM/IgG (Prueba rápida)"
+]
+
+for rapid_test in RAPID_TEST_NAMES:
+    if rapid_test not in TEST_TEMPLATES:
+        TEST_TEMPLATES[rapid_test] = build_bool_observation_template()
+
+for cultivo_name in ("Cultivo de otras secreciones", "Cultivo de secreción vaginal"):
+    TEST_TEMPLATES[cultivo_name] = {"fields": copy.deepcopy(CULTIVO_SECRECION_FIELDS)}
+
+
+class AddTestsDialog(QDialog):
+    def __init__(self, tests, disabled_tests=None, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Agregar pruebas a la orden")
+        self.setMinimumSize(420, 480)
+        layout = QVBoxLayout(self)
+        description = QLabel("Seleccione las pruebas adicionales que desea agregar a la orden actual.")
+        description.setWordWrap(True)
+        layout.addWidget(description)
+        self.list_widget = QListWidget()
+        self.list_widget.setSelectionMode(QListWidget.MultiSelection)
+        disabled_set = set(disabled_tests or [])
+        for name, category in tests:
+            display_text = f"{name} ({category})" if category else name
+            item = QListWidgetItem(display_text)
+            item.setData(Qt.UserRole, name)
+            if name in disabled_set:
+                item.setFlags(item.flags() & ~Qt.ItemIsEnabled)
+                item.setText(f"{display_text} — ya incluido")
+            self.list_widget.addItem(item)
+        layout.addWidget(self.list_widget)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def get_selected_tests(self):
+        return [item.data(Qt.UserRole) for item in self.list_widget.selectedItems() if item.flags() & Qt.ItemIsEnabled]
+
+
 class MainWindow(QMainWindow):
     def __init__(self, labdb, user):
         super().__init__()
@@ -558,7 +662,7 @@ class MainWindow(QMainWindow):
         if patient:
             # Rellenar campos con datos existentes
             _, _, _, first_name, last_name, birth_date, sex, origin, hcl, height, weight, blood_pressure = patient
-            self.input_first_name.setText(first_name); self.input_last_name.setText(last_name)
+            self.input_first_name.setText((first_name or "").upper()); self.input_last_name.setText((last_name or "").upper())
             if birth_date:
                 bd = QDate.fromString(birth_date, "yyyy-MM-dd")
                 if bd.isValid():
@@ -595,8 +699,10 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "Documento inválido", f"El {doc_type} no debe exceder 20 caracteres.")
                 return
         # Obtener datos del formulario
-        first_name = self.input_first_name.text().strip()
-        last_name = self.input_last_name.text().strip()
+        first_name = self.input_first_name.text().strip().upper()
+        last_name = self.input_last_name.text().strip().upper()
+        self.input_first_name.setText(first_name)
+        self.input_last_name.setText(last_name)
         birth_date = self.input_birth_date.date().toString("yyyy-MM-dd")
         sex = "Femenino" if self.sex_female_radio.isChecked() else "Masculino"
         origin = self.get_current_origin()
@@ -738,8 +844,8 @@ class MainWindow(QMainWindow):
             oid, first, last, date, doc_type, doc_number = row
             self.pending_orders_cache.append({
                 "id": oid,
-                "first_name": first,
-                "last_name": last,
+                "first_name": (first or "").upper(),
+                "last_name": (last or "").upper(),
                 "date": date,
                 "doc_type": doc_type or "",
                 "doc_number": doc_number or ""
@@ -795,7 +901,13 @@ class MainWindow(QMainWindow):
         doc_type = order.get('doc_type') or ""
         doc_number = order.get('doc_number') or ""
         doc_text = f" ({doc_type} {doc_number})" if doc_type and doc_number else ""
-        return f"Orden #{order['id']} | {order['date']} | {order['first_name']} {order['last_name']}{doc_text}"
+        first = (order.get('first_name') or "").upper()
+        last = (order.get('last_name') or "").upper()
+        name_text = (f"{first} {last}").strip()
+        status_tag = ""
+        if 'emitted' in order:
+            status_tag = " [EMITIDO]" if order.get('emitted') else " [POR EMITIR]"
+        return f"Orden #{order['id']} | {order['date']} | {name_text}{doc_text}{status_tag}"
     def _select_order_in_combo(self, combo, order_id):
         for idx in range(combo.count()):
             if combo.itemData(idx) == order_id:
@@ -884,7 +996,10 @@ class MainWindow(QMainWindow):
         self.selected_order_id = order_id
         # Consultar pruebas de esa orden
         self.labdb.cur.execute("""
-            SELECT t.name, ot.result FROM order_tests ot JOIN tests t ON ot.test_id = t.id WHERE ot.order_id=?
+            SELECT t.name, ot.result, t.category
+            FROM order_tests ot
+            JOIN tests t ON ot.test_id = t.id
+            WHERE ot.order_id=?
         """, (order_id,))
         rows = self.labdb.cur.fetchall()
         if not rows:
@@ -894,8 +1009,11 @@ class MainWindow(QMainWindow):
             self.results_layout.addWidget(empty_label)
             self.results_layout.addStretch()
             return
-        for test_name, raw_result in rows:
+        for test_name, raw_result, category in rows:
             template = TEST_TEMPLATES.get(test_name)
+            if template is None and category == "PRUEBAS RÁPIDAS":
+                template = build_bool_observation_template()
+                TEST_TEMPLATES[test_name] = template
             group_box = QGroupBox(test_name)
             group_box.setStyleSheet("QGroupBox { font-weight: bold; }")
             group_layout = QFormLayout()
@@ -1350,11 +1468,15 @@ class MainWindow(QMainWindow):
         lbl = QLabel("Orden completada:")
         self.combo_completed = QComboBox()
         btn_view = QPushButton("Ver")
+        btn_add_tests = QPushButton("Agregar pruebas")
         top_layout.addWidget(lbl)
         top_layout.addWidget(self.combo_completed, 1)
         top_layout.addWidget(btn_view)
+        top_layout.addWidget(btn_add_tests)
         layout.addLayout(top_layout)
         sort_layout = QHBoxLayout()
+        self.include_emitted_checkbox = QCheckBox("Mostrar emitidos")
+        sort_layout.addWidget(self.include_emitted_checkbox)
         sort_layout.addStretch()
         sort_label = QLabel("Ordenar:")
         self.completed_sort_combo = QComboBox()
@@ -1375,23 +1497,69 @@ class MainWindow(QMainWindow):
         btn_view.clicked.connect(self.display_selected_result)
         btn_pdf.clicked.connect(self.export_pdf)
         btn_excel.clicked.connect(self.export_excel)
+        btn_add_tests.clicked.connect(self.add_tests_to_selected_order)
+        self.include_emitted_checkbox.toggled.connect(self.populate_completed_orders)
         self.completed_sort_combo.currentIndexChanged.connect(lambda: self._refresh_completed_combo())
     def populate_completed_orders(self):
         # Llenar combo de órdenes completadas
-        completed_rows = self.labdb.get_completed_orders()
+        include_emitted = False
+        if hasattr(self, 'include_emitted_checkbox'):
+            include_emitted = self.include_emitted_checkbox.isChecked()
+        completed_rows = self.labdb.get_completed_orders(include_emitted=include_emitted)
         self.completed_orders_cache = []
         for row in completed_rows:
-            oid, first, last, date, doc_type, doc_number = row
+            oid, first, last, date, doc_type, doc_number, emitted, emitted_at = row
             order = {
                 "id": oid,
-                "first_name": first,
-                "last_name": last,
+                "first_name": (first or "").upper(),
+                "last_name": (last or "").upper(),
                 "date": date,
                 "doc_type": doc_type or "",
-                "doc_number": doc_number or ""
+                "doc_number": doc_number or "",
+                "emitted": bool(emitted),
+                "emitted_at": emitted_at
             }
             self.completed_orders_cache.append(order)
         self._refresh_completed_combo()
+
+    def add_tests_to_selected_order(self):
+        data = self.combo_completed.currentData() if hasattr(self, 'combo_completed') else None
+        if data is None:
+            QMessageBox.information(self, "Sin selección", "Seleccione una orden para agregar pruebas adicionales.")
+            return
+        order_id = int(data)
+        all_tests = self.labdb.get_all_tests()
+        existing = self.labdb.get_tests_for_order(order_id)
+        dialog = AddTestsDialog(all_tests, existing, self)
+        if dialog.exec_() != QDialog.Accepted:
+            return
+        selected = dialog.get_selected_tests()
+        if not selected:
+            QMessageBox.information(self, "Sin cambios", "No se seleccionaron nuevas pruebas.")
+            return
+        added = self.labdb.add_tests_to_order(order_id, selected)
+        if not added:
+            QMessageBox.information(self, "Sin cambios", "Las pruebas seleccionadas ya estaban asociadas a la orden.")
+            return
+        QMessageBox.information(
+            self,
+            "Pruebas agregadas",
+            "Se agregaron {0} prueba(s). Registre los resultados antes de emitir nuevamente.".format(len(added))
+        )
+        self.selected_order_id = order_id
+        self.populate_pending_orders()
+        self.populate_completed_orders()
+        reply = QMessageBox.question(
+            self,
+            "Registrar resultados",
+            "¿Desea ir a la pantalla de resultados para completar las nuevas pruebas?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if reply == QMessageBox.Yes:
+            self.stack.setCurrentWidget(self.page_resultados)
+            if hasattr(self, 'combo_orders'):
+                self._select_order_in_combo(self.combo_orders, order_id)
+            self.load_order_fields()
     def display_selected_result(self):
         # Mostrar los resultados de la orden seleccionada en el cuadro de texto
         data = self.combo_completed.currentData()
@@ -1403,17 +1571,27 @@ class MainWindow(QMainWindow):
             return
         pat = info["patient"]; ord_inf = info["order"]; results = info["results"]
         doc_text = " ".join([part for part in (pat.get('doc_type'), pat.get('doc_number')) if part]) or "-"
-        lines = [f"Paciente: {pat.get('name') or '-'}", f"Documento: {doc_text}"]
+        lines = [f"PACIENTE: {pat.get('name') or '-'}", f"DOCUMENTO: {doc_text}"]
         age_value = self._calculate_age_years(pat, ord_inf)
-        lines.append(f"Edad: {age_value} años" if age_value is not None else "Edad: -")
-        lines.append(f"Sexo: {pat.get('sex') or '-'}")
-        lines.append(f"Historia Clínica: {pat.get('hcl') or '-'}")
-        lines.append(f"Procedencia: {pat.get('origin') or '-'}")
-        lines.append(f"Fecha de muestra: {ord_inf.get('date') or '-'}")
-        emission_display = ord_inf.get('emitted_at') or "Pendiente de emisión"
-        lines.append(f"Fecha de emisión: {emission_display}")
-        lines.append("Resultados:")
-        for test_name, result in results:
+        lines.append(f"EDAD: {age_value} AÑOS" if age_value is not None else "EDAD: -")
+        lines.append(f"SEXO: {pat.get('sex') or '-'}")
+        lines.append(f"HISTORIA CLÍNICA: {pat.get('hcl') or '-'}")
+        lines.append(f"PROCEDENCIA: {pat.get('origin') or '-'}")
+        lines.append(f"FECHA DE MUESTRA: {ord_inf.get('date') or '-'}")
+        lines.append(f"SOLICITANTE: {ord_inf.get('requested_by') or '-'}")
+        lines.append(f"DIAGNÓSTICO PRESUNTIVO: {ord_inf.get('diagnosis') or '-'}")
+        emission_raw = ord_inf.get('emitted_at')
+        if emission_raw:
+            try:
+                emission_dt = datetime.datetime.strptime(emission_raw, "%Y-%m-%d %H:%M:%S")
+                emission_display = emission_dt.strftime("%d/%m/%Y %H:%M")
+            except Exception:
+                emission_display = emission_raw
+        else:
+            emission_display = "Pendiente de emisión"
+        lines.append(f"FECHA DE EMISIÓN: {emission_display}")
+        lines.append("RESULTADOS:")
+        for test_name, result, _ in results:
             lines.extend(self._format_result_lines(test_name, result))
         if ord_inf["observations"]:
             lines.append(f"Observaciones: {ord_inf['observations']}")
@@ -1436,110 +1614,93 @@ class MainWindow(QMainWindow):
             return
         if not file_path.lower().endswith(".pdf"):
             file_path += ".pdf"
-        emission_time = datetime.datetime.now()
-        emission_display = emission_time.strftime("%d/%m/%Y %H:%M")
-        emission_timestamp = emission_time.strftime("%Y-%m-%d %H:%M:%S")
+        existing_emission = ord_inf.get('emitted_at')
+        mark_as_emitted = not (ord_inf.get('emitted') and existing_emission)
+        if mark_as_emitted:
+            emission_time = datetime.datetime.now()
+            emission_display = emission_time.strftime("%d/%m/%Y %H:%M")
+            emission_timestamp = emission_time.strftime("%Y-%m-%d %H:%M:%S")
+        else:
+            emission_timestamp = existing_emission
+            try:
+                parsed = datetime.datetime.strptime(existing_emission, "%Y-%m-%d %H:%M:%S")
+                emission_display = parsed.strftime("%d/%m/%Y %H:%M")
+            except Exception:
+                emission_display = existing_emission or "-"
         doc_text = " ".join([part for part in (pat.get('doc_type'), pat.get('doc_number')) if part]) or "-"
+        patient_name = (pat.get('name') or '-').upper()
         age_text = self._format_age_text(pat, ord_inf)
         order_date_text = ord_inf.get('date') or "-"
+        sex_text = (pat.get('sex') or '-').upper()
+        hcl_text = (pat.get('hcl') or '-').upper()
+        origin_text = (pat.get('origin') or '-').upper()
+        requester_text = (ord_inf.get('requested_by') or '-').upper()
+        diagnosis_text = (ord_inf.get('diagnosis') or '-').upper()
         pdf = FPDF('P', 'mm', 'A4')
         pdf.set_margins(12, 12, 12)
         pdf.set_auto_page_break(True, margin=14)
         pdf.add_page()
-        emission_row = ("Fecha emisión", emission_display)
-        info_rows = [
-            (("Paciente", pat.get('name') or '-'), ("Edad", age_text)),
-            (("Documento", doc_text), ("Sexo", pat.get('sex') or '-')),
-            (("Historia clínica", pat.get('hcl') or '-'), emission_row),
-            (("Procedencia", pat.get('origin') or '-'), ("Fecha muestra", order_date_text)),
+        header_image_path = os.path.join("img", "img.png")
+        info_pairs = [
+            (("Paciente", patient_name), ("Edad", age_text)),
+            (("Documento", doc_text.upper() if doc_text else "-"), ("Sexo", sex_text)),
+            (("Historia clínica", hcl_text), ("Fecha emisión", emission_display)),
+            (("Procedencia", origin_text), ("Fecha muestra", order_date_text)),
+            (("Solicitante", requester_text), ("Diagnóstico presuntivo", diagnosis_text)),
         ]
 
-        header_context = {
-            'info_rows': info_rows,
-            'emission_display': emission_display
-        }
-
-        def add_logo(position, x_pos, width, y_pos):
-            path = self._find_logo_path(position)
-            if not path:
-                return
-            try:
-                pdf.image(path, x=x_pos, y=y_pos, w=width)
-            except Exception:
-                pass
-
-        def draw_page_header():
-            pdf.set_fill_color(231, 238, 248)
-            pdf.rect(0, 0, pdf.w, 30, 'F')
-            top_y = pdf.t_margin - 4
-            add_logo('left', pdf.l_margin - 4, 22, top_y)
-            add_logo('right', pdf.w - pdf.r_margin - 18, 20, top_y)
-            center_logo = self._find_logo_path('center')
-            if center_logo:
-                try:
-                    pdf.image(center_logo, x=(pdf.w - 18) / 2, y=top_y + 1, w=18)
-                except Exception:
-                    pass
-            pdf.set_xy(0, top_y + 0.5)
-            pdf.set_font("Arial", 'B', 13)
-            pdf.set_text_color(21, 64, 120)
-            pdf.cell(0, 6, "LABORATORIO CLÍNICO", ln=1, align='C')
-            pdf.set_font("Arial", '', 9)
-            pdf.set_text_color(60, 78, 102)
-            pdf.cell(0, 4.5, LAB_TITLE, ln=1, align='C')
-            pdf.set_font("Arial", '', 8)
-            pdf.cell(0, 4, "Informe de resultados", ln=1, align='C')
-            pdf.set_text_color(0, 0, 0)
-            pdf.set_y(30)
-            pdf.set_draw_color(46, 117, 182)
-            pdf.set_line_width(0.4)
-            pdf.line(pdf.l_margin, pdf.get_y(), pdf.w - pdf.r_margin, pdf.get_y())
-            pdf.ln(2)
-            draw_patient_info()
-
         def draw_patient_info():
-            table_width = pdf.w - pdf.l_margin - pdf.r_margin
-            col_spacing = 3
-            col_width = (table_width - col_spacing) / 2
-            label_font = ("Arial", 'B', 7)
-            value_font = ("Arial", '', 7.6)
-            pdf.set_font("Arial", 'B', 8)
-            pdf.set_text_color(21, 64, 120)
+            col_width = (pdf.w - pdf.l_margin - pdf.r_margin) / 2
+
+            def render_pair(label, value, x_start, width, start_y):
+                pdf.set_xy(x_start, start_y)
+                pdf.set_font("Arial", 'B', 7.2)
+                pdf.cell(width, 3.4, f"{label.upper()}:", border=0)
+                pdf.set_font("Arial", '', 7.2)
+                pdf.set_xy(x_start, pdf.get_y())
+                safe_value = str(value) if value not in (None, "") else "-"
+                pdf.multi_cell(width, 3.6, safe_value, border=0)
+                return pdf.get_y()
+
+            pdf.set_font("Arial", 'B', 8.8)
+            pdf.set_text_color(30, 30, 30)
             pdf.cell(0, 5, "Datos del paciente", ln=1)
             pdf.set_text_color(0, 0, 0)
             pdf.ln(1)
-            pdf.set_draw_color(205, 214, 226)
-            pdf.set_line_width(0.25)
-            pdf.set_fill_color(248, 251, 255)
-
-            def render_cell(label, value, width):
-                start_x = pdf.get_x()
+            for left, right in info_pairs:
                 start_y = pdf.get_y()
-                safe_value = str(value) if value not in (None, "") else "-"
-                pdf.rect(start_x, start_y, width, 9, 'F')
-                pdf.set_xy(start_x + 1.2, start_y + 1.2)
-                pdf.set_font(*label_font)
-                pdf.set_text_color(82, 98, 120)
-                pdf.cell(width - 2.4, 3, label.upper(), border=0)
-                pdf.set_font(*value_font)
-                pdf.set_text_color(0, 0, 0)
-                pdf.set_xy(start_x + 1.2, start_y + 4.2)
-                pdf.multi_cell(width - 2.4, 3.3, safe_value, border=0)
-                end_y = pdf.get_y()
-                total_height = max(9, end_y - start_y + 1.2)
-                pdf.set_draw_color(205, 214, 226)
-                pdf.rect(start_x, start_y, width, total_height)
-                pdf.set_xy(start_x + width, start_y)
-                return total_height
+                left_end = render_pair(left[0], left[1], pdf.l_margin, col_width, start_y)
+                right_end = render_pair(right[0], right[1], pdf.l_margin + col_width, col_width, start_y)
+                pdf.set_y(max(left_end, right_end) + 1.2)
 
-            for left, right in header_context['info_rows']:
-                row_y = pdf.get_y()
-                pdf.set_x(pdf.l_margin)
-                left_height = render_cell(left[0], left[1], col_width)
-                pdf.set_x(pdf.l_margin + col_width + col_spacing)
-                right_height = render_cell(right[0], right[1], col_width)
-                pdf.set_y(row_y + max(left_height, right_height) + 1)
-            pdf.ln(2)
+        def draw_page_header():
+            top_y = max(5, pdf.t_margin - 6)
+            header_drawn = False
+            if os.path.exists(header_image_path):
+                try:
+                    header_width = pdf.w - pdf.l_margin - pdf.r_margin
+                    header_height = 27
+                    pdf.image(header_image_path, x=pdf.l_margin, y=top_y, w=header_width, h=header_height)
+                    pdf.set_y(top_y + header_height + 2)
+                    header_drawn = True
+                except Exception:
+                    header_drawn = False
+            if not header_drawn:
+                fallback_logo = self._find_logo_path('center')
+                if fallback_logo:
+                    try:
+                        pdf.image(fallback_logo, x=(pdf.w - 28) / 2, y=top_y, w=28)
+                        pdf.set_y(top_y + 30)
+                        header_drawn = True
+                    except Exception:
+                        header_drawn = False
+            if not header_drawn:
+                pdf.set_y(pdf.t_margin)
+                pdf.set_font("Arial", 'B', 12)
+                pdf.cell(0, 6, LAB_TITLE, ln=1, align='C')
+                pdf.ln(2)
+            draw_patient_info()
+            pdf.ln(1.5)
 
         def ensure_space(required_height):
             if pdf.get_y() + required_height > pdf.h - pdf.b_margin:
@@ -1652,7 +1813,7 @@ class MainWindow(QMainWindow):
             pdf.set_text_color(0, 0, 0)
             pdf.ln(1.2)
 
-        for test_name, raw_result in results:
+        for test_name, raw_result, _ in results:
             structure = self._extract_result_structure(test_name, raw_result)
             draw_test_header(test_name)
             def on_new_page():
@@ -1689,7 +1850,8 @@ class MainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.warning(self, "Error", f"No se pudo guardar el PDF:\n{e}")
             return
-        self.labdb.mark_order_emitted(order_id, emission_timestamp)
+        if mark_as_emitted:
+            self.labdb.mark_order_emitted(order_id, emission_timestamp)
         QMessageBox.information(self, "Informe emitido", f"Reporte guardado en:\n{file_path}")
         self.populate_completed_orders()
         self.output_text.clear()
@@ -1715,12 +1877,12 @@ class MainWindow(QMainWindow):
             with open(file_path, 'w', encoding='utf-8') as f:
                 f.write("Nombre,Apellidos,Documento,Prueba,Resultado,Fecha,Solicitante,Diagnostico presuntivo,Edad (años)\n")
                 for first, last, doc_type, doc_num, test_name, result, date, requester, diagnosis, age_years in rows:
-                    name = first; surn = last; doc = f"{doc_type} {doc_num}"
+                    name = (first or "").upper(); surn = (last or "").upper(); doc = f"{doc_type} {doc_num}".strip()
                     res = self._format_result_for_export(test_name, result)
                     res = res.replace('"', "'")
                     dt = date
-                    req = requester or ""
-                    diag = diagnosis or ""
+                    req = (requester or "").upper()
+                    diag = (diagnosis or "").upper()
                     age_txt = str(age_years) if age_years is not None else ""
                     line = f"{name},{surn},{doc},{test_name},\"{res}\",{dt},{req},{diag},{age_txt}\n"
                     f.write(line)
