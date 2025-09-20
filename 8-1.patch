@@ -1,0 +1,161 @@
+diff --git a/database.py b/database.py
+index 1520d7869c7354c75764fd45de39ae119f290333..b002546270892b83b4e5e5c91ba1f549a097188f 100644
+--- a/database.py
++++ b/database.py
+@@ -100,75 +100,84 @@ class LabDB:
+                     "Bilirrubina Total", "Bilirrubina Directa", "Úrea", "Creatinina",
+                     "Proteína de 24 horas", "Fosfatasa alcalina", "Ácido úrico",
+                     "Proteínas Totales", "Albúmina", "Amilasa", "Lipasa",
+                     "Gamma Glutamil transferasa (GGT)", "Globulina", "Ferritina",
+                     "Hemoglobina glicosilada", "Gases arteriales"
+                 ],
+                 "INMUNOLOGÍA": [
+                     "Grupo sanguíneo y Factor Rh", "Factor reumatoideo", "Reacción de Widal",
+                     "Reagina plasmática rápida (RPR)", "Proteína C reactiva (PCR) - Látex",
+                     "PCR cuantitativo", "ASO", "Antígeno de superficie Hepatitis B (HBsAg)",
+                     "PSA (ELISA)"
+                 ],
+                 "PRUEBAS RÁPIDAS": [
+                     "BHCG (Prueba de embarazo en sangre)", "VIH (Prueba rápida)", "Sífilis (Prueba rápida)",
+                     "VIH/Sífilis (Prueba combinada)", "Hepatitis A (Prueba rápida)", "Hepatitis B (Prueba rápida)",
+                     "PSA (Prueba rápida)", "Sangre oculta en heces (Prueba rápida)", "Helicobacter pylori (Prueba rápida)",
+                     "Covid-19 (Prueba antigénica)", "Covid-19 (Prueba serológica)", "Dengue NS1/IgM/IgG (Prueba rápida)"
+                 ],
+                 "PARASITOLOGÍA": [
+                     "Gota gruesa", "Frotis para Leishmaniasis", "Examen coprológico (concentración)",
+                     "Examen coprológico (directo)", "Test de Graham"
+                 ],
+                 "MICROBIOLOGÍA": [
+                     "Baciloscopía", "Coloración de Gram", "Examen directo (hongos/KOH)",
+                     "Urocultivo", "Coprocultivo", "Cultivo de Neisseria gonorrhoeae",
+-                    "Cultivo de Campylobacter spp.", "Cultivo de otras secreciones", "Cultivo de secreción vaginal",
++                    "Cultivo de Campylobacter spp.", "Secreción (otros sitios)", "Secreción vaginal",
+                     "Identificación bioquímica", "Antibiograma", "Frotis para Bartonella"
+                 ],
+                 "MICROSCOPÍA": [
+                     "Reacción inflamatoria", "Test de Helecho", "Examen completo de orina", "Sedimento urinario"
+                 ],
+                 "OTROS": [
+                     "Ácido sulfasalicílico al 3%", "Test de aminas", "Contenido gástrico (en RN)"
+                 ],
+                 "TOMA DE MUESTRA": [
+                     "Leishmaniasis (toma de muestra)", "Dengue (toma de muestra)", "Leptospirosis (toma de muestra)",
+                     "Covid-19 (hisopado nasofaríngeo)", "Carga viral de VIH / Recuento de CD4",
+                     "CLIA (PSA, Perfil tiroideo, etc.)", "Sangre venosa/arterial (examen de proceso)"
+                 ]
+             }
+             for cat, tests in tests_by_category.items():
+                 for test in tests:
+                     self.cur.execute("INSERT INTO tests(name, category) VALUES (?,?)", (test, cat))
+             self.conn.commit()
+         # Ajustes posteriores para bases de datos existentes
+         self._ensure_test_renamed(
+             "HCG (Prueba de embarazo en orina)",
+             "BHCG (Prueba de embarazo en sangre)"
+         )
+-        self._ensure_test_exists("Cultivo de secreción vaginal", "MICROBIOLOGÍA")
++        self._ensure_test_renamed(
++            "Cultivo de secreción vaginal",
++            "Secreción vaginal"
++        )
++        self._ensure_test_renamed(
++            "Cultivo de otras secreciones",
++            "Secreción (otros sitios)"
++        )
++        self._ensure_test_exists("Secreción vaginal", "MICROBIOLOGÍA")
++        self._ensure_test_exists("Secreción (otros sitios)", "MICROBIOLOGÍA")
+         # Cargar mapa de pruebas (nombre -> id)
+         self.cur.execute("SELECT id, name FROM tests")
+         for tid, name in self.cur.fetchall():
+             self.test_map[name] = tid
+     def authenticate_user(self, username, password):
+         self.cur.execute("SELECT id, username, role FROM users WHERE username=? AND password=?", (username, password))
+         row = self.cur.fetchone()
+         if row:
+             uid, user, role = row
+             return {"id": uid, "username": user, "role": role}
+         else:
+             return None
+     def create_user(self, username, password, role):
+         try:
+             self.cur.execute("INSERT INTO users(username, password, role) VALUES (?,?,?)", (username, password, role))
+             self.conn.commit()
+             return True
+         except sqlite3.IntegrityError:
+             return False
+     def find_patient(self, doc_type, doc_number):
+         self.cur.execute("SELECT * FROM patients WHERE doc_type=? AND doc_number=?", (doc_type, doc_number))
+         return self.cur.fetchone()
+     def add_or_update_patient(self, doc_type, doc_number, first_name, last_name, birth_date, sex, origin, hcl, height, weight, blood_pressure):
+         first_name = first_name.upper() if first_name else first_name
+         last_name = last_name.upper() if last_name else last_name
+diff --git a/database.py b/database.py
+index 1520d7869c7354c75764fd45de39ae119f290333..b002546270892b83b4e5e5c91ba1f549a097188f 100644
+--- a/database.py
++++ b/database.py
+@@ -289,50 +298,65 @@ class LabDB:
+         completed_flag = 1 if remaining == 0 else 0
+         self.cur.execute("UPDATE orders SET completed=? WHERE id=?", (completed_flag, order_id))
+         self.conn.commit()
+         return completed_flag
+     def mark_order_emitted(self, order_id, emitted_at):
+         self.cur.execute(
+             """
+             UPDATE orders
+             SET emitted=1,
+                 emitted_at=COALESCE(emitted_at, ?)
+             WHERE id=?
+             """,
+             (emitted_at, order_id)
+         )
+         self.conn.commit()
+     def get_statistics(self):
+         stats = {}
+         self.cur.execute("SELECT COUNT(*) FROM patients"); stats["total_patients"] = self.cur.fetchone()[0]
+         self.cur.execute("SELECT COUNT(*) FROM orders"); stats["total_orders"] = self.cur.fetchone()[0]
+         self.cur.execute("SELECT COUNT(*) FROM order_tests"); stats["total_tests_conducted"] = self.cur.fetchone()[0]
+         self.cur.execute("""
+             SELECT t.category, COUNT(*) FROM order_tests ot JOIN tests t ON ot.test_id = t.id GROUP BY t.category
+         """)
+         stats["by_category"] = self.cur.fetchall()
+         return stats
++    def get_results_in_range(self, start_datetime, end_datetime):
++        self.cur.execute(
++            """
++            SELECT o.id, o.date, p.first_name, p.last_name, p.doc_type, p.doc_number,
++                   o.age_years, t.name, ot.result
++            FROM order_tests ot
++            JOIN orders o ON ot.order_id = o.id
++            JOIN patients p ON o.patient_id = p.id
++            JOIN tests t ON ot.test_id = t.id
++            WHERE datetime(o.date) BETWEEN datetime(?) AND datetime(?)
++            ORDER BY datetime(o.date) ASC, o.id ASC, ot.id ASC
++            """,
++            (start_datetime, end_datetime)
++        )
++        return self.cur.fetchall()
+     def get_distinct_requesters(self):
+         self.cur.execute("SELECT DISTINCT requested_by FROM orders WHERE requested_by IS NOT NULL AND requested_by<>'' ORDER BY requested_by")
+         return [row[0] for row in self.cur.fetchall() if row[0]]
+     def _ensure_column_exists(self, table_name, column_name, column_type, default_value=None):
+         self.cur.execute(f"PRAGMA table_info({table_name})")
+         columns = [info[1] for info in self.cur.fetchall()]
+         if column_name not in columns:
+             alter_sql = f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}"
+             if default_value is not None:
+                 alter_sql += f" DEFAULT '{default_value}'"
+             self.cur.execute(alter_sql)
+             self.conn.commit()
+ 
+     def get_all_tests(self):
+         self.cur.execute("SELECT name, category FROM tests ORDER BY category, name")
+         return self.cur.fetchall()
+ 
+     def get_tests_for_order(self, order_id):
+         self.cur.execute("""
+             SELECT t.name FROM order_tests ot
+             JOIN tests t ON ot.test_id = t.id
+             WHERE ot.order_id=?
+         """, (order_id,))
+         return [row[0] for row in self.cur.fetchall()]
+ 

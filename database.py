@@ -122,7 +122,7 @@ class LabDB:
                 "MICROBIOLOGÍA": [
                     "Baciloscopía", "Coloración de Gram", "Examen directo (hongos/KOH)",
                     "Urocultivo", "Coprocultivo", "Cultivo de Neisseria gonorrhoeae",
-                    "Cultivo de Campylobacter spp.", "Cultivo de otras secreciones", "Cultivo de secreción vaginal",
+                    "Cultivo de Campylobacter spp.", "Secreción (otros sitios)", "Secreción vaginal",
                     "Identificación bioquímica", "Antibiograma", "Frotis para Bartonella"
                 ],
                 "MICROSCOPÍA": [
@@ -146,7 +146,16 @@ class LabDB:
             "HCG (Prueba de embarazo en orina)",
             "BHCG (Prueba de embarazo en sangre)"
         )
-        self._ensure_test_exists("Cultivo de secreción vaginal", "MICROBIOLOGÍA")
+        self._ensure_test_renamed(
+            "Cultivo de secreción vaginal",
+            "Secreción vaginal"
+        )
+        self._ensure_test_renamed(
+            "Cultivo de otras secreciones",
+            "Secreción (otros sitios)"
+        )
+        self._ensure_test_exists("Secreción vaginal", "MICROBIOLOGÍA")
+        self._ensure_test_exists("Secreción (otros sitios)", "MICROBIOLOGÍA")
         # Cargar mapa de pruebas (nombre -> id)
         self.cur.execute("SELECT id, name FROM tests")
         for tid, name in self.cur.fetchall():
@@ -311,6 +320,21 @@ class LabDB:
         """)
         stats["by_category"] = self.cur.fetchall()
         return stats
+    def get_results_in_range(self, start_datetime, end_datetime):
+        self.cur.execute(
+            """
+            SELECT o.id, o.date, p.first_name, p.last_name, p.doc_type, p.doc_number,
+                   o.age_years, t.name, ot.result
+            FROM order_tests ot
+            JOIN orders o ON ot.order_id = o.id
+            JOIN patients p ON o.patient_id = p.id
+            JOIN tests t ON ot.test_id = t.id
+            WHERE datetime(o.date) BETWEEN datetime(?) AND datetime(?)
+            ORDER BY datetime(o.date) ASC, o.id ASC, ot.id ASC
+            """,
+            (start_datetime, end_datetime)
+        )
+        return self.cur.fetchall()
     def get_distinct_requesters(self):
         self.cur.execute("SELECT DISTINCT requested_by FROM orders WHERE requested_by IS NOT NULL AND requested_by<>'' ORDER BY requested_by")
         return [row[0] for row in self.cur.fetchall() if row[0]]
