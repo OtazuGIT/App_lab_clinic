@@ -3,6 +3,8 @@ import copy
 import datetime
 import json
 import os
+import re
+import unicodedata
 from collections import OrderedDict
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout,
                              QStackedWidget, QFormLayout, QScrollArea, QGroupBox, QComboBox,
@@ -977,6 +979,7 @@ class MainWindow(QMainWindow):
         side_menu_layout.addSpacing(10)
         # Secciones/Páginas
         self.stack = QStackedWidget()
+        self.current_order_context = None
         # Contenedor principal con cabecera y reloj
         content_widget = QWidget()
         content_layout = QVBoxLayout(content_widget)
@@ -1562,14 +1565,19 @@ class MainWindow(QMainWindow):
             return
         order_id = int(data)
         self.selected_order_id = order_id
-        # Consultar pruebas de esa orden
-        self.labdb.cur.execute("""
-            SELECT t.name, ot.result, t.category
-            FROM order_tests ot
-            JOIN tests t ON ot.test_id = t.id
-            WHERE ot.order_id=?
-        """, (order_id,))
-        rows = self.labdb.cur.fetchall()
+        info = self.labdb.get_order_details(order_id)
+        if not info:
+            empty_label = QLabel("La orden seleccionada no tiene pruebas registradas.")
+            empty_label.setStyleSheet("color: #555; font-style: italic;")
+            empty_label.setWordWrap(True)
+            self.results_layout.addWidget(empty_label)
+            self.results_layout.addStretch()
+            self.populate_pending_orders()
+            return
+        patient_info = info.get("patient", {})
+        order_info = info.get("order", {})
+        rows = info.get("results", [])
+        self.current_order_context = {"patient": patient_info, "order": order_info}
         if not rows:
             empty_label = QLabel("La orden seleccionada no tiene pruebas asociadas.")
             empty_label.setStyleSheet("color: #555; font-style: italic;")
@@ -1596,9 +1604,18 @@ class MainWindow(QMainWindow):
                     TEST_TEMPLATES[test_name] = copy.deepcopy(template)
             group_box = QGroupBox(test_name)
             group_box.setStyleSheet("QGroupBox { font-weight: bold; }")
+            container_layout = QVBoxLayout()
+            header_layout = QHBoxLayout()
+            header_layout.addStretch()
+            remove_button = QPushButton("Quitar examen")
+            remove_button.setStyleSheet("QPushButton { font-size: 10px; color: #c0392b; }")
+            remove_button.clicked.connect(lambda _=False, name=test_name: self._prompt_remove_test(name))
+            header_layout.addWidget(remove_button)
+            container_layout.addLayout(header_layout)
             group_layout = QFormLayout()
             group_layout.setLabelAlignment(Qt.AlignLeft)
-            group_box.setLayout(group_layout)
+            container_layout.addLayout(group_layout)
+            group_box.setLayout(container_layout)
             parsed = self._parse_stored_result(raw_result)
             existing_values = {}
             if parsed.get("type") == "structured":
@@ -1611,7 +1628,7 @@ class MainWindow(QMainWindow):
                         section_label.setStyleSheet("font-weight: bold; color: #2c3e50; padding-top:4px;")
                         group_layout.addRow(section_label)
                         continue
-                    label_text, field_widget, widget_info = self._create_structured_field(field_def, existing_values)
+                    label_text, field_widget, widget_info = self._create_structured_field(field_def, existing_values, self.current_order_context)
                     widget_info["definition"] = field_def
                     key = field_def.get("key")
                     if key:
@@ -1648,6 +1665,26 @@ class MainWindow(QMainWindow):
     def _should_auto_calculate_hb(self, order_test_names):
         valid_names = [name for name in order_test_names if name]
         return valid_names.count("Hematocrito") == 1 and len(valid_names) == 1
+
+    def _prompt_remove_test(self, test_name):
+        if not self.selected_order_id:
+            return
+        reply = QMessageBox.question(
+            self,
+            "Quitar examen",
+            f"¿Desea quitar la prueba '{test_name}' de la orden seleccionada?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if reply == QMessageBox.No:
+            return
+        removed = self.labdb.remove_test_from_order(self.selected_order_id, test_name)
+        if removed:
+            QMessageBox.information(self, "Prueba eliminada", f"Se quitó '{test_name}' de la orden.")
+            self.populate_pending_orders()
+            self.populate_completed_orders()
+            self.load_order_fields()
+        else:
+            QMessageBox.warning(self, "Acción no realizada", "No se pudo quitar la prueba seleccionada.")
     def save_results(self):
         # Guardar los resultados ingresados para la orden seleccionada
         if not self.selected_order_id:
@@ -1700,12 +1737,13 @@ class MainWindow(QMainWindow):
     def _clear_results_layout(self):
         if not hasattr(self, 'results_layout'):
             return
+        self.current_order_context = None
         while self.results_layout.count():
             item = self.results_layout.takeAt(0)
             widget = item.widget()
             if widget:
                 widget.deleteLater()
-    def _create_structured_field(self, field_def, existing_values):
+    def _create_structured_field(self, field_def, existing_values, context=None):
         key = field_def.get("key")
         value = ""
         if key:
@@ -1778,7 +1816,7 @@ class MainWindow(QMainWindow):
             unit_label = QLabel(unit)
             unit_label.setStyleSheet("color: #555; font-size: 11px;")
             layout.addWidget(unit_label)
-        reference = field_def.get("reference")
+        reference = self._get_field_reference(field_def, context)
         if reference:
             ref_label = QLabel(f"Ref: {reference}")
             ref_label.setWordWrap(True)
@@ -1938,9 +1976,10 @@ class MainWindow(QMainWindow):
         if isinstance(value, str):
             return value.strip() == ""
         return False
-    def _format_result_lines(self, test_name, raw_result):
+    def _format_result_lines(self, test_name, raw_result, context=None):
         parsed = self._parse_stored_result(raw_result)
         template = TEST_TEMPLATES.get(test_name)
+        effective_context = context or self.current_order_context
         if parsed.get("type") == "structured" and template:
             values = parsed.get("values", {})
             value_lines = []
@@ -1969,7 +2008,7 @@ class MainWindow(QMainWindow):
                     display_text = str(display_value)
                     if not display_text.endswith(unit):
                         display_value = f"{display_text} {unit}"
-                reference = field_def.get("reference")
+                reference = self._get_field_reference(field_def, effective_context)
                 label = field_def.get("label", key)
                 if pending_section:
                     value_lines.append(pending_section)
@@ -1989,8 +2028,8 @@ class MainWindow(QMainWindow):
         elif self._is_blank_result(text_value):
             return []
         return [f"{test_name}: {text_value}"]
-    def _format_result_for_export(self, test_name, raw_result):
-        lines = self._format_result_lines(test_name, raw_result)
+    def _format_result_for_export(self, test_name, raw_result, context=None):
+        lines = self._format_result_lines(test_name, raw_result, context=context)
         if not lines:
             return ""
         if len(lines) <= 1:
@@ -2085,10 +2124,133 @@ class MainWindow(QMainWindow):
     def _format_age_text(self, patient_info, order_info):
         age_value = self._calculate_age_years(patient_info, order_info)
         return f"{age_value} años" if age_value is not None else "-"
-    def _extract_result_structure(self, test_name, raw_result):
+
+    def _get_field_reference(self, field_def, context=None):
+        if not field_def:
+            return None
+        reference = field_def.get("reference")
+        if not reference:
+            return reference
+        effective_context = context or self.current_order_context
+        return self._filter_reference_for_context(reference, effective_context)
+
+    def _filter_reference_for_context(self, reference, context):
+        if not reference or not isinstance(reference, str):
+            return reference
+        if not context:
+            return reference
+        patient_info = context.get("patient", {}) if isinstance(context, dict) else {}
+        order_info = context.get("order", {}) if isinstance(context, dict) else {}
+        age_value = self._calculate_age_years(patient_info, order_info)
+        sex_text = self._normalize_text(patient_info.get("sex", ""))
+        segments = self._split_reference_segments(reference)
+        applicable = []
+        general_segments = []
+        for segment in segments:
+            classification = self._classify_reference_segment(segment)
+            if self._segment_matches_context(classification, age_value, sex_text):
+                applicable.append(segment.strip())
+            elif not classification['groups'] and not classification['sexes']:
+                general_segments.append(segment.strip())
+        if applicable:
+            return "\n".join(applicable)
+        if general_segments:
+            return "\n".join(general_segments)
+        return reference
+
+    def _split_reference_segments(self, reference_text):
+        segments = []
+        for raw_line in str(reference_text).split('\n'):
+            for part in raw_line.split('|'):
+                cleaned = part.strip()
+                if cleaned:
+                    segments.append(cleaned)
+        return segments or [str(reference_text).strip()]
+
+    def _normalize_text(self, text):
+        if not isinstance(text, str):
+            text = str(text or "")
+        normalized = unicodedata.normalize("NFD", text.lower())
+        return "".join(ch for ch in normalized if unicodedata.category(ch) != 'Mn')
+
+    def _classify_reference_segment(self, segment):
+        normalized = self._normalize_text(segment)
+        groups = set()
+        sexes = set()
+        if any(keyword in normalized for keyword in ["rn", "recien nacido", "neon", "lactant"]):
+            groups.add('newborn')
+        if any(keyword in normalized for keyword in ["nino", "ninos", "infantil", "pediatr", "menor", "adolesc"]):
+            groups.add('child')
+        if "mes" in normalized:
+            groups.add('child')
+        if any(keyword in normalized for keyword in ["adulto", "adultos", "mayor", "ancian", "geriatr"]):
+            groups.add('adult')
+        if any(keyword in normalized for keyword in ["mujer", "mujeres", "femen"]):
+            sexes.add('female')
+            groups.add('adult')
+        if any(keyword in normalized for keyword in ["hombre", "hombres", "varon", "varones", "mascul"]):
+            sexes.add('male')
+            groups.add('adult')
+        if "gestant" in normalized or "embaraz" in normalized:
+            sexes.add('female')
+            groups.add('adult')
+        for match in re.finditer(r'(\d+)\s*[-–]\s*(\d+)\s*(?:anos|ano|a)', normalized):
+            start = int(match.group(1))
+            end = int(match.group(2))
+            self._assign_age_range_groups(groups, start, end)
+        for match in re.finditer(r'(?:>=|<=|>|<)?\s*(\d+)\s*(?:anos|ano|a)', normalized):
+            age = int(match.group(1))
+            self._assign_age_range_groups(groups, age, age)
+        for match in re.finditer(r'(\d+)\s*(?:mes|meses)', normalized):
+            months = int(match.group(1))
+            groups.add('child')
+            if months <= 1:
+                groups.add('newborn')
+        return {"groups": groups, "sexes": sexes}
+
+    def _assign_age_range_groups(self, groups, start_age, end_age):
+        if end_age < 0 or start_age < 0:
+            return
+        if end_age >= 18 and start_age >= 18:
+            groups.add('adult')
+        elif end_age < 18:
+            if end_age <= 1:
+                groups.add('newborn')
+            groups.add('child')
+        else:
+            groups.update({'child', 'adult'})
+
+    def _segment_matches_context(self, classification, age_value, normalized_sex):
+        groups = classification.get('groups', set())
+        sexes = classification.get('sexes', set())
+        if age_value is None:
+            return self._segment_matches_sex(sexes, normalized_sex)
+        target_groups = set()
+        if age_value <= 0:
+            target_groups.add('newborn')
+        if age_value < 18:
+            target_groups.add('child')
+        if age_value >= 18:
+            target_groups.add('adult')
+        if groups and not groups.intersection(target_groups):
+            return False
+        return self._segment_matches_sex(sexes, normalized_sex)
+
+    def _segment_matches_sex(self, sexes, normalized_sex):
+        if not sexes:
+            return True
+        if not normalized_sex:
+            return True
+        if any(keyword in normalized_sex for keyword in ["femen", "mujer"]):
+            return 'female' in sexes
+        if any(keyword in normalized_sex for keyword in ["mascul", "hombre", "varon"]):
+            return 'male' in sexes
+        return True
+    def _extract_result_structure(self, test_name, raw_result, context=None):
         parsed = self._parse_stored_result(raw_result)
         template_key = parsed.get("template") if isinstance(parsed, dict) else None
         template = TEST_TEMPLATES.get(template_key) if template_key in TEST_TEMPLATES else TEST_TEMPLATES.get(test_name)
+        effective_context = context or self.current_order_context
         if parsed.get("type") == "structured" and template:
             values = parsed.get("values", {})
             items = []
@@ -2121,7 +2283,7 @@ class MainWindow(QMainWindow):
                     "type": "value",
                     "label": field_def.get("label", key),
                     "value": display_value,
-                    "reference": field_def.get("reference")
+                    "reference": self._get_field_reference(field_def, effective_context)
                 })
             return {"type": "structured", "items": items}
         text_value = parsed.get("value", raw_result or "")
@@ -2266,6 +2428,7 @@ class MainWindow(QMainWindow):
         if not info:
             return
         pat = info["patient"]; ord_inf = info["order"]; results = info["results"]
+        context = {"patient": pat, "order": ord_inf}
         doc_text = " ".join([part for part in (pat.get('doc_type'), pat.get('doc_number')) if part]) or "-"
         lines = [f"PACIENTE: {pat.get('name') or '-'}", f"DOCUMENTO: {doc_text}"]
         age_value = self._calculate_age_years(pat, ord_inf)
@@ -2288,7 +2451,7 @@ class MainWindow(QMainWindow):
         lines.append(f"FECHA DE EMISIÓN: {emission_display}")
         lines.append("RESULTADOS:")
         for test_name, result, _ in results:
-            formatted_lines = self._format_result_lines(test_name, result)
+            formatted_lines = self._format_result_lines(test_name, result, context=context)
             if formatted_lines:
                 lines.extend(formatted_lines)
         if ord_inf["observations"]:
@@ -2350,15 +2513,46 @@ class MainWindow(QMainWindow):
         def draw_patient_info():
             col_width = (pdf.w - pdf.l_margin - pdf.r_margin) / 2
 
+            def wrap_value_lines(text, width):
+                safe_value = str(text) if text not in (None, "") else "-"
+                safe_value = self._ensure_latin1(safe_value)
+                segments = []
+                for part in safe_value.split('\n'):
+                    part = part.strip()
+                    if part:
+                        segments.append(part)
+                if not segments:
+                    segments = [safe_value.strip() or "-"]
+                lines = []
+                for segment in segments:
+                    words = segment.split()
+                    if not words:
+                        lines.append("-")
+                        continue
+                    current = words[0]
+                    for word in words[1:]:
+                        candidate = f"{current} {word}"
+                        if pdf.get_string_width(candidate) <= max(width, 1):
+                            current = candidate
+                        else:
+                            lines.append(current)
+                            current = word
+                    lines.append(current)
+                return lines or ["-"]
+
             def render_pair(label, value, x_start, width, start_y):
                 pdf.set_xy(x_start, start_y)
                 pdf.set_font("Arial", 'B', 7.2)
-                pdf.cell(width, 3.4, self._ensure_latin1(f"{label.upper()}:"), border=0)
+                pdf.cell(width, 3.2, self._ensure_latin1(f"{label.upper()}:"), border=0)
                 pdf.set_font("Arial", '', 7.2)
-                pdf.set_xy(x_start, pdf.get_y())
-                safe_value = str(value) if value not in (None, "") else "-"
-                pdf.multi_cell(width, 3.6, self._ensure_latin1(safe_value), border=0)
-                return pdf.get_y()
+                current_y = start_y + 3.2
+                value_lines = wrap_value_lines(value, width - 1.2)
+                line_height = 3.0
+                for line in value_lines:
+                    pdf.set_xy(x_start, current_y)
+                    pdf.cell(width, line_height, line, border=0)
+                    current_y += line_height
+                return current_y
 
             pdf.set_font("Arial", 'B', 8.8)
             pdf.set_text_color(30, 30, 30)
@@ -2513,7 +2707,7 @@ class MainWindow(QMainWindow):
             pdf.ln(1.2)
 
         for test_name, raw_result, _ in results:
-            structure = self._extract_result_structure(test_name, raw_result)
+            structure = self._extract_result_structure(test_name, raw_result, context=context)
             if structure.get("type") == "structured":
                 items = structure.get("items", [])
                 if not any(item.get("type") == "value" for item in items):
@@ -2578,7 +2772,8 @@ class MainWindow(QMainWindow):
         if not file_path.lower().endswith(".csv"):
             file_path += ".csv"
         self.labdb.cur.execute("""
-            SELECT p.first_name, p.last_name, p.doc_type, p.doc_number, t.name, ot.result, o.date, o.requested_by, o.diagnosis, o.age_years
+            SELECT p.first_name, p.last_name, p.doc_type, p.doc_number, p.sex, p.birth_date,
+                   t.name, ot.result, o.date, o.requested_by, o.diagnosis, o.age_years
             FROM order_tests ot
             JOIN orders o ON ot.order_id = o.id
             JOIN patients p ON o.patient_id = p.id
@@ -2588,9 +2783,13 @@ class MainWindow(QMainWindow):
         try:
             with open(file_path, 'w', encoding='utf-8') as f:
                 f.write("Nombre,Apellidos,Documento,Prueba,Resultado,Fecha,Solicitante,Diagnostico presuntivo,Edad (años)\n")
-                for first, last, doc_type, doc_num, test_name, result, date, requester, diagnosis, age_years in rows:
+                for first, last, doc_type, doc_num, sex, birth_date, test_name, result, date, requester, diagnosis, age_years in rows:
                     name = (first or "").upper(); surn = (last or "").upper(); doc = f"{doc_type} {doc_num}".strip()
-                    res = self._format_result_for_export(test_name, result)
+                    context = {
+                        "patient": {"sex": sex, "birth_date": birth_date},
+                        "order": {"age_years": age_years}
+                    }
+                    res = self._format_result_for_export(test_name, result, context=context)
                     res = res.replace('"', "'")
                     dt = date
                     req = (requester or "").upper()
@@ -2781,7 +2980,7 @@ class MainWindow(QMainWindow):
             end_dt.strftime("%Y-%m-%d %H:%M:%S")
         )
         activity_data = []
-        for order_id, date_str, first, last, doc_type, doc_number, age_years, test_name, category, result in rows:
+        for order_id, date_str, first, last, doc_type, doc_number, sex, birth_date, age_years, test_name, category, result in rows:
             try:
                 order_dt = datetime.datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
                 date_display = order_dt.strftime("%d/%m/%Y %H:%M")
@@ -2790,7 +2989,11 @@ class MainWindow(QMainWindow):
             patient_name = " ".join(part for part in [(first or "").upper(), (last or "").upper()] if part).strip() or "-"
             doc_text = " ".join(part for part in (doc_type, doc_number) if part).strip() or "-"
             age_display = str(age_years) if age_years not in (None, "") else "-"
-            result_text = self._format_result_for_export(test_name, result).replace('\n', ' ')
+            context = {
+                "patient": {"sex": sex, "birth_date": birth_date},
+                "order": {"age_years": age_years}
+            }
+            result_text = self._format_result_for_export(test_name, result, context=context).replace('\n', ' ')
             if result_text.strip() == "":
                 continue
             activity_data.append({
@@ -2891,19 +3094,14 @@ class MainWindow(QMainWindow):
         pdf.ln(2)
         headers = [
             "Fecha",
-            "Orden",
-            "Paciente",
             "Documento",
-            "Edad",
-            "Hematología",
-            "Bioquímica",
-            "Micro/Parasitología",
-            "Otros exámenes",
+            "Paciente",
+            "Pruebas realizadas",
             "Emitido"
         ]
-        column_widths = [27, 12, 44, 28, 12, 33, 33, 33, 30, 18]
+        column_widths = [28, 35, 52, 138, 20]
         pdf.set_fill_color(220, 220, 220)
-        pdf.set_font("Arial", 'B', 8.5)
+        pdf.set_font("Arial", 'B', 7.8)
         for header, width in zip(headers, column_widths):
             pdf.cell(width, 6, self._ensure_latin1(header), border=1, align='C', fill=True)
         pdf.ln(6)
@@ -2917,11 +3115,11 @@ class MainWindow(QMainWindow):
                 pdf.cell(0, 6, self._ensure_latin1(f"Registro de resultados - {description}"), ln=1, align='C')
                 pdf.ln(2)
                 pdf.set_fill_color(220, 220, 220)
-                pdf.set_font("Arial", 'B', 8.5)
+                pdf.set_font("Arial", 'B', 7.8)
                 for header, width in zip(headers, column_widths):
                     pdf.cell(width, 6, self._ensure_latin1(header), border=1, align='C', fill=True)
                 pdf.ln(6)
-                pdf.set_font("Arial", '', 7.4)
+                pdf.set_font("Arial", '', 6.4)
 
         def wrap_cell_text(text, available_width):
             sanitized = self._ensure_latin1(str(text) if text not in (None, "") else "-")
@@ -2950,9 +3148,9 @@ class MainWindow(QMainWindow):
             return lines or ["-"]
 
         def render_row(texts):
-            line_height = 3.8
-            padding_x = 1.4
-            padding_y = 1.0
+            line_height = 3.0
+            padding_x = 1.2
+            padding_y = 0.8
             cell_lines = []
             max_lines = 1
             for idx, text in enumerate(texts):
@@ -2978,26 +3176,25 @@ class MainWindow(QMainWindow):
                     text_y += line_height
             pdf.set_xy(pdf.l_margin, y_start + row_height)
 
-        pdf.set_font("Arial", '', 7.4)
+        pdf.set_font("Arial", '', 6.4)
 
-        def format_group(entry, key):
-            values = entry.get("groups", {}).get(key, [])
+        def format_tests(entry):
+            values = []
+            for key in ("hematology", "biochemistry", "micro_parasito", "others"):
+                group_values = entry.get("groups", {}).get(key, [])
+                if group_values:
+                    values.extend(group_values)
             return "\n".join(values) if values else "-"
 
         for entry in aggregated:
-            cells = [
+            ordered_cells = [
                 entry.get("date", "-"),
-                str(entry.get("order_id", "-")),
-                entry.get("patient", "-"),
                 entry.get("document", "-"),
-                entry.get("age", "-"),
-                format_group(entry, "hematology"),
-                format_group(entry, "biochemistry"),
-                format_group(entry, "micro_parasito"),
-                format_group(entry, "others"),
+                entry.get("patient", "-"),
+                format_tests(entry),
                 self._format_emission_status(entry.get("emitted"), entry.get("emitted_at"))
             ]
-            render_row(cells)
+            render_row(ordered_cells)
         try:
             pdf.output(file_path)
         except Exception as exc:
@@ -3044,6 +3241,8 @@ class MainWindow(QMainWindow):
                 last_name,
                 doc_type,
                 doc_value,
+                sex,
+                birth_date,
                 age_years,
                 emitted,
                 emitted_at
@@ -3056,7 +3255,11 @@ class MainWindow(QMainWindow):
             patient_name = " ".join(part for part in [(first_name or "").upper(), (last_name or "").upper()] if part).strip() or "-"
             doc_text = " ".join(part for part in (doc_type, doc_value) if part).strip() or "-"
             age_display = str(age_years) if age_years not in (None, "") else "-"
-            result_text = self._format_result_for_export(test_name, raw_result).replace('\n', ' ')
+            context = {
+                "patient": {"sex": sex, "birth_date": birth_date},
+                "order": {"age_years": age_years}
+            }
+            result_text = self._format_result_for_export(test_name, raw_result, context=context).replace('\n', ' ')
             if result_text.strip() == "":
                 continue
             records.append({

@@ -248,18 +248,16 @@ class LabDB:
     def get_order_details(self, order_id):
         self.cur.execute("""
             SELECT p.first_name, p.last_name, p.doc_type, p.doc_number, p.birth_date, p.sex, p.origin, p.hcl,
-                   o.date, o.observations, o.requested_by, o.diagnosis, o.age_years, o.emitted, o.emitted_at,
-                   t.name, ot.result, t.category
+                   o.date, o.observations, o.requested_by, o.diagnosis, o.age_years, o.emitted, o.emitted_at
             FROM orders o
             JOIN patients p ON o.patient_id = p.id
-            JOIN order_tests ot ON ot.order_id = o.id
-            JOIN tests t ON ot.test_id = t.id
             WHERE o.id = ?
         """, (order_id,))
-        rows = self.cur.fetchall()
-        if not rows:
+        header = self.cur.fetchone()
+        if not header:
             return None
-        first_name, last_name, doc_type, doc_number, birth_date, sex, origin, hcl, date, obs, req_by, diag, age_years, emitted, emitted_at, _, _, _ = rows[0]
+        (first_name, last_name, doc_type, doc_number, birth_date, sex, origin, hcl,
+         date, obs, req_by, diag, age_years, emitted, emitted_at) = header
         patient_info = {
             "name": f"{(first_name or '').upper()} {(last_name or '').upper()}".strip(),
             "doc_type": doc_type,
@@ -278,7 +276,14 @@ class LabDB:
             "emitted": emitted,
             "emitted_at": emitted_at,
         }
-        results = [(row[15], row[16], row[17]) for row in rows]
+        self.cur.execute("""
+            SELECT t.name, ot.result, t.category
+            FROM order_tests ot
+            JOIN tests t ON ot.test_id = t.id
+            WHERE ot.order_id = ?
+            ORDER BY ot.id ASC
+        """, (order_id,))
+        results = self.cur.fetchall()
         return {"patient": patient_info, "order": order_info, "results": results}
     def save_results(self, order_id, results_dict):
         for name, result in results_dict.items():
@@ -292,10 +297,38 @@ class LabDB:
                     "UPDATE order_tests SET result=? WHERE order_id=? AND test_id=?",
                     (stored, order_id, tid)
                 )
-        # Verificar si quedan resultados vacíos
-        self.cur.execute("SELECT COUNT(*) FROM order_tests WHERE order_id=? AND (result IS NULL OR result='')", (order_id,))
-        remaining = self.cur.fetchone()[0]
-        completed_flag = 1 if remaining == 0 else 0
+        return self._update_order_completion(order_id)
+
+    def remove_test_from_order(self, order_id, test_name):
+        if not test_name:
+            return False
+        if test_name not in self.test_map:
+            self.cur.execute("SELECT id FROM tests WHERE name=?", (test_name,))
+            row = self.cur.fetchone()
+            if row:
+                self.test_map[test_name] = row[0]
+        tid = self.test_map.get(test_name)
+        if not tid:
+            return False
+        self.cur.execute("DELETE FROM order_tests WHERE order_id=? AND test_id=?", (order_id, tid))
+        if self.cur.rowcount:
+            self._update_order_completion(order_id)
+            return True
+        self.conn.commit()
+        return False
+
+    def _update_order_completion(self, order_id):
+        self.cur.execute("SELECT COUNT(*) FROM order_tests WHERE order_id=?", (order_id,))
+        total = self.cur.fetchone()[0]
+        if total == 0:
+            completed_flag = 1
+        else:
+            self.cur.execute(
+                "SELECT COUNT(*) FROM order_tests WHERE order_id=? AND (result IS NULL OR result='')",
+                (order_id,)
+            )
+            pending = self.cur.fetchone()[0]
+            completed_flag = 1 if pending == 0 else 0
         self.cur.execute("UPDATE orders SET completed=? WHERE id=?", (completed_flag, order_id))
         self.conn.commit()
         return completed_flag
@@ -324,7 +357,7 @@ class LabDB:
         self.cur.execute(
             """
             SELECT o.id, o.date, p.first_name, p.last_name, p.doc_type, p.doc_number,
-                   o.age_years, t.name, t.category, ot.result
+                   p.sex, p.birth_date, o.age_years, t.name, t.category, ot.result
             FROM order_tests ot
             JOIN orders o ON ot.order_id = o.id
             JOIN patients p ON o.patient_id = p.id
@@ -395,7 +428,7 @@ class LabDB:
         query = """
             SELECT o.id, o.date, t.name, ot.result, t.category,
                    p.first_name, p.last_name, p.doc_type, p.doc_number,
-                   o.age_years, o.emitted, o.emitted_at
+                   p.sex, p.birth_date, o.age_years, o.emitted, o.emitted_at
             FROM orders o
             JOIN patients p ON o.patient_id = p.id
             JOIN order_tests ot ON ot.order_id = o.id
