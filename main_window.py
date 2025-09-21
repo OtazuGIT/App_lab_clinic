@@ -58,13 +58,6 @@ HEMOGRAM_BASE_FIELDS = [
         "placeholder": "Ej. 7 500"
     },
     {
-        "key": "leucocitos_conteo",
-        "label": "Agregar conteo (leucocitos)",
-        "helper": "Ingrese el conteo manual; se multiplicará por 50 para el total",
-        "optional": True,
-        "placeholder": "Ej. 120"
-    },
-    {
         "key": "eritrocitos",
         "label": "Recuento de hematíes (RBC)",
         "unit": "millones/µL",
@@ -86,13 +79,6 @@ HEMOGRAM_BASE_FIELDS = [
             "Adultos: 150 000-400 000 /µL"
         ),
         "placeholder": "Ej. 250 000"
-    },
-    {
-        "key": "plaquetas_conteo",
-        "label": "Agregar conteo (plaquetas)",
-        "helper": "Ingrese el conteo manual; se multiplicará por 15000 para el total",
-        "optional": True,
-        "placeholder": "Ej. 12"
     },
     {
         "key": "segmentados",
@@ -414,24 +400,6 @@ TEST_TEMPLATES = {
                 "operand": 3.03,
                 "decimals": 2,
                 "description": "Hb = Hto / 3.03 (cálculo automático)",
-            },
-            {
-                "source": "leucocitos_conteo",
-                "target": "leucocitos",
-                "operation": "multiply",
-                "operand": 50,
-                "decimals": 0,
-                "description": "Total de leucocitos = conteo × 50",
-                "clear_on_invalid": True
-            },
-            {
-                "source": "plaquetas_conteo",
-                "target": "plaquetas",
-                "operation": "multiply",
-                "operand": 15000,
-                "decimals": 0,
-                "description": "Total de plaquetas = conteo × 15000",
-                "clear_on_invalid": True
             }
         ]
     },
@@ -445,24 +413,6 @@ TEST_TEMPLATES = {
                 "operand": 3.03,
                 "decimals": 2,
                 "description": "Hb = Hto / 3.03 (cálculo automático)",
-            },
-            {
-                "source": "leucocitos_conteo",
-                "target": "leucocitos",
-                "operation": "multiply",
-                "operand": 50,
-                "decimals": 0,
-                "description": "Total de leucocitos = conteo × 50",
-                "clear_on_invalid": True
-            },
-            {
-                "source": "plaquetas_conteo",
-                "target": "plaquetas",
-                "operation": "multiply",
-                "operand": 15000,
-                "decimals": 0,
-                "description": "Total de plaquetas = conteo × 15000",
-                "clear_on_invalid": True
             }
         ]
     },
@@ -2497,6 +2447,7 @@ class MainWindow(QMainWindow):
         origin_text = (pat.get('origin') or '-').upper()
         requester_text = (ord_inf.get('requested_by') or '-').upper()
         diagnosis_text = (ord_inf.get('diagnosis') or '-').upper()
+        context = {"patient": pat, "order": ord_inf}
         pdf = FPDF('P', 'mm', 'A4')
         pdf.set_margins(12, 12, 12)
         pdf.set_auto_page_break(True, margin=14)
