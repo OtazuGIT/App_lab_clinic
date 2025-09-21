@@ -1,0 +1,56 @@
+diff --git a/database.py b/database.py
+index 0b71dda0fc1d9cd2fc22835f0fb6692bf1e9eb9a..ab71828875a455b05c64abd73a46586472a8188a 100644
+--- a/database.py
++++ b/database.py
+@@ -136,50 +136,51 @@ class LabDB:
+                 "TOMA DE MUESTRA": [
+                     "Leishmaniasis (toma de muestra)", "Dengue (toma de muestra)", "Leptospirosis (toma de muestra)",
+                     "Covid-19 (hisopado nasofaríngeo)", "Carga viral de VIH / Recuento de CD4",
+                     "CLIA (PSA, Perfil tiroideo, etc.)", "Sangre venosa/arterial (examen de proceso)"
+                 ]
+             }
+             for cat, tests in tests_by_category.items():
+                 for test in tests:
+                     self.cur.execute("INSERT INTO tests(name, category) VALUES (?,?)", (test, cat))
+             self.conn.commit()
+         # Ajustes posteriores para bases de datos existentes
+         self._ensure_test_renamed(
+             "HCG (Prueba de embarazo en orina)",
+             "BHCG (Prueba de embarazo en sangre)"
+         )
+         self._ensure_test_renamed(
+             "Cultivo de secreción vaginal",
+             "Secreción vaginal"
+         )
+         self._ensure_test_renamed(
+             "Cultivo de otras secreciones",
+             "Secreción (otros sitios)"
+         )
+         self._ensure_test_exists("Secreción vaginal", "MICROBIOLOGÍA")
+         self._ensure_test_exists("Secreción (otros sitios)", "MICROBIOLOGÍA")
++        self._ensure_test_exists("Hemoglobina - Hematocrito", "HEMATOLOGÍA")
+         # Cargar mapa de pruebas (nombre -> id)
+         self.cur.execute("SELECT id, name FROM tests")
+         for tid, name in self.cur.fetchall():
+             self.test_map[name] = tid
+     def authenticate_user(self, username, password):
+         self.cur.execute("SELECT id, username, role FROM users WHERE username=? AND password=?", (username, password))
+         row = self.cur.fetchone()
+         if row:
+             uid, user, role = row
+             return {"id": uid, "username": user, "role": role}
+         else:
+             return None
+     def create_user(self, username, password, role):
+         try:
+             self.cur.execute("INSERT INTO users(username, password, role) VALUES (?,?,?)", (username, password, role))
+             self.conn.commit()
+             return True
+         except sqlite3.IntegrityError:
+             return False
+     def find_patient(self, doc_type, doc_number):
+         self.cur.execute("SELECT * FROM patients WHERE doc_type=? AND doc_number=?", (doc_type, doc_number))
+         return self.cur.fetchone()
+     def add_or_update_patient(self, doc_type, doc_number, first_name, last_name, birth_date, sex, origin, hcl, height, weight, blood_pressure):
+         first_name = first_name.upper() if first_name else first_name
+         last_name = last_name.upper() if last_name else last_name

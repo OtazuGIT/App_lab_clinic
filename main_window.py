@@ -20,6 +20,8 @@ REGISTRY_ABBREVIATIONS = {
     "hematocrito (hto)": "Hto",
     "hemoglobina": "Hb",
     "hemoglobina (hb)": "Hb",
+    "hemoglobina - hematocrito": "Hb/Hto",
+    "hemoglobina hematocrito": "Hb/Hto",
     "leucocitos": "Leu",
     "leucocitos totales": "Leu",
     "recuento de leucocitos": "Leu",
@@ -953,6 +955,48 @@ def build_hematocrit_template(include_auto_hemoglobin=False):
         ]
     template["fields"] = fields
     return template
+
+
+def build_hemoglobin_hematocrit_combo_template():
+    template = build_hematocrit_template(include_auto_hemoglobin=True)
+    fields = template.get("fields", [])
+    hb_info = SIMPLE_NUMERIC_TESTS.get("Hemoglobina", {})
+    hematocrit_field = None
+    hemoglobin_field = None
+    for field in fields:
+        if field.get("key") == "hematocrito":
+            hematocrit_field = field
+        elif field.get("key") == "hemoglobina":
+            hemoglobin_field = field
+    if hemoglobin_field:
+        hb_label = hb_info.get("label", "Hemoglobina")
+        if "hb" not in hb_label.lower():
+            hb_label = f"{hb_label} (Hb)"
+        hemoglobin_field["label"] = hb_label
+        placeholder = hb_info.get("placeholder") or "Ej. 13.8"
+        hemoglobin_field["placeholder"] = placeholder
+        helper_text = hb_info.get("helper")
+        if helper_text:
+            hemoglobin_field["helper"] = helper_text
+    ordered_fields = []
+    if hemoglobin_field:
+        ordered_fields.append(hemoglobin_field)
+    if hematocrit_field:
+        ordered_fields.append(hematocrit_field)
+    if ordered_fields:
+        template["fields"] = ordered_fields
+    for calc in template.get("auto_calculations", []):
+        calc["only_if_empty"] = True
+        description = calc.get("description")
+        if description:
+            if "ajust" not in description.lower():
+                calc["description"] = f"{description} (se puede ajustar manualmente)"
+        else:
+            calc["description"] = "Hb estimada = Hto / 3.03 (se puede ajustar manualmente)"
+    return template
+
+
+TEST_TEMPLATES["Hemoglobina - Hematocrito"] = build_hemoglobin_hematocrit_combo_template()
 
 RAPID_TEST_NAMES = [
     "BHCG (Prueba de embarazo en sangre)",
@@ -2131,8 +2175,25 @@ class MainWindow(QMainWindow):
         if not sections:
             return []
         lines = []
-        for pairs in sections:
+        for section_idx, pairs in enumerate(sections):
             processed_pairs = self._post_process_registry_pairs(pairs)
+            if not processed_pairs:
+                continue
+            first_entry = processed_pairs[0]
+            if first_entry.get("key") == "resultado":
+                result_value = first_entry.get("value")
+                if result_value:
+                    lines.append(f"{test_name}: {result_value}")
+                for extra in processed_pairs[1:]:
+                    extra_value = extra.get("value")
+                    if not extra_value:
+                        continue
+                    label = extra.get("label", "")
+                    if label:
+                        lines.append(f"{label}: {extra_value}")
+                    else:
+                        lines.append(str(extra_value))
+                continue
             parts = []
             for entry in processed_pairs:
                 label = entry.get("label", "")
@@ -2144,7 +2205,20 @@ class MainWindow(QMainWindow):
                 else:
                     parts.append(str(value))
             if parts:
-                lines.append(", ".join(parts))
+                line_text = ", ".join(parts)
+                if section_idx == 0 and test_name:
+                    normalized_line = self._normalize_text(line_text)
+                    normalized_test = self._normalize_text(test_name)
+                    expected_label = self._abbreviate_registry_label(test_name)
+                    normalized_expected = self._normalize_text(expected_label) if expected_label else ""
+                    include_name = True
+                    if normalized_test and normalized_test in normalized_line:
+                        include_name = False
+                    elif normalized_expected and normalized_expected in normalized_line:
+                        include_name = False
+                    if include_name:
+                        line_text = f"{test_name}: {line_text}"
+                lines.append(line_text)
         return lines
 
     def _collect_registry_sections(self, test_name, raw_result, context=None):
@@ -3440,26 +3514,9 @@ class MainWindow(QMainWindow):
             "Otros exámenes / Observaciones"
         ]
         column_widths = [24, 74, 50, 45, 45, 35]
-        pdf.set_fill_color(220, 220, 220)
-        pdf.set_font("Arial", 'B', 7.8)
-        for header, width in zip(headers, column_widths):
-            pdf.cell(width, 6, self._ensure_latin1(header), border=1, align='C', fill=True)
-        pdf.ln(6)
-
-        def ensure_space(required_height):
-            if pdf.get_y() + required_height > pdf.h - pdf.b_margin:
-                pdf.add_page()
-                pdf.set_font("Arial", 'B', 12)
-                pdf.cell(0, 8, self._ensure_latin1(LAB_TITLE), ln=1, align='C')
-                pdf.set_font("Arial", '', 9)
-                pdf.cell(0, 6, self._ensure_latin1(f"Registro de resultados - {description}"), ln=1, align='C')
-                pdf.ln(2)
-                pdf.set_fill_color(220, 220, 220)
-                pdf.set_font("Arial", 'B', 7.8)
-                for header, width in zip(headers, column_widths):
-                    pdf.cell(width, 6, self._ensure_latin1(header), border=1, align='C', fill=True)
-                pdf.ln(6)
-                pdf.set_font("Arial", '', 6.4)
+        line_height = 3.0
+        padding_x = 1.2
+        padding_y = 0.8
 
         def wrap_cell_text(text, available_width):
             sanitized = self._ensure_latin1(str(text) if text not in (None, "") else "-")
@@ -3487,10 +3544,47 @@ class MainWindow(QMainWindow):
                 lines.append(current)
             return lines or ["-"]
 
+        def draw_header():
+            pdf.set_fill_color(220, 220, 220)
+            pdf.set_font("Arial", 'B', 7.8)
+            cell_lines = []
+            max_lines = 1
+            for idx, header in enumerate(headers):
+                available = max(column_widths[idx] - 2 * padding_x, 1)
+                lines = wrap_cell_text(header, available)
+                cell_lines.append(lines)
+                if len(lines) > max_lines:
+                    max_lines = len(lines)
+            row_height = max_lines * line_height + 2 * padding_y
+            x_start = pdf.l_margin
+            y_start = pdf.get_y()
+            pdf.set_draw_color(180, 180, 180)
+            pdf.set_line_width(0.25)
+            for idx, lines in enumerate(cell_lines):
+                cell_width = column_widths[idx]
+                x_pos = x_start + sum(column_widths[:idx])
+                pdf.rect(x_pos, y_start, cell_width, row_height, style='DF')
+                text_y = y_start + padding_y
+                for line in lines:
+                    pdf.set_xy(x_pos + padding_x, text_y)
+                    pdf.cell(cell_width - 2 * padding_x, line_height, line, border=0, align='C')
+                    text_y += line_height
+            pdf.set_xy(pdf.l_margin, y_start + row_height)
+            pdf.set_font("Arial", '', 6.4)
+
+        def ensure_space(required_height):
+            if pdf.get_y() + required_height > pdf.h - pdf.b_margin:
+                pdf.add_page()
+                pdf.set_font("Arial", 'B', 12)
+                pdf.cell(0, 8, self._ensure_latin1(LAB_TITLE), ln=1, align='C')
+                pdf.set_font("Arial", '', 9)
+                pdf.cell(0, 6, self._ensure_latin1(f"Registro de resultados - {description}"), ln=1, align='C')
+                pdf.ln(2)
+                draw_header()
+                return True
+            return False
+
         def render_row(texts):
-            line_height = 3.0
-            padding_x = 1.2
-            padding_y = 0.8
             cell_lines = []
             max_lines = 1
             for idx, text in enumerate(texts):
@@ -3516,7 +3610,7 @@ class MainWindow(QMainWindow):
                     text_y += line_height
             pdf.set_xy(pdf.l_margin, y_start + row_height)
 
-        pdf.set_font("Arial", '', 6.4)
+        draw_header()
 
         def group_text(entry, key):
             values = entry.get("groups", {}).get(key, [])

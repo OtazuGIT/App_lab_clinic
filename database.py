@@ -158,6 +158,7 @@ class LabDB:
         )
         self._ensure_test_exists("Secreción vaginal", "MICROBIOLOGÍA")
         self._ensure_test_exists("Secreción (otros sitios)", "MICROBIOLOGÍA")
+        self._ensure_test_exists("Hemoglobina - Hematocrito", "HEMATOLOGÍA")
         # Cargar mapa de pruebas (nombre -> id)
         self.cur.execute("SELECT id, name FROM tests")
         for tid, name in self.cur.fetchall():
