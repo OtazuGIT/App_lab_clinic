@@ -51,6 +51,7 @@ class LabDB:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 patient_id INTEGER,
                 date TEXT,
+                sample_date TEXT,
                 created_by INTEGER,
                 observations TEXT,
                 requested_by TEXT,
@@ -64,6 +65,7 @@ class LabDB:
         # Asegurarse de que columnas nuevas existan para bases de datos creadas anteriormente
         self._ensure_column_exists("orders", "diagnosis", "TEXT", default_value="")
         self._ensure_column_exists("orders", "age_years", "INTEGER")
+        self._ensure_column_exists("orders", "sample_date", "TEXT")
         self._ensure_column_exists("orders", "emitted", "INTEGER", default_value="0")
         self._ensure_column_exists("orders", "emitted_at", "TEXT")
         self.cur.execute("""
@@ -197,9 +199,22 @@ class LabDB:
             """, (doc_type, doc_number, first_name, last_name, birth_date, sex, origin, hcl, height, weight, blood_pressure))
             self.conn.commit()
             return self.cur.lastrowid
-    def add_order_with_tests(self, patient_id, test_names, user_id, observations="", requested_by="", diagnosis="", age_years=None):
+    def add_order_with_tests(
+        self,
+        patient_id,
+        test_names,
+        user_id,
+        observations="",
+        requested_by="",
+        diagnosis="",
+        age_years=None,
+        sample_date=None
+    ):
         import datetime
         date_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        sample_date_str = None
+        if sample_date:
+            sample_date_str = str(sample_date)
         age_value = None
         if age_years is not None:
             try:
@@ -207,9 +222,9 @@ class LabDB:
             except (TypeError, ValueError):
                 age_value = None
         self.cur.execute("""
-            INSERT INTO orders(patient_id, date, created_by, observations, requested_by, diagnosis, age_years, completed)
-            VALUES (?,?,?,?,?,?,?,?)
-        """, (patient_id, date_str, user_id, observations, requested_by, diagnosis, age_value, 0))
+            INSERT INTO orders(patient_id, date, sample_date, created_by, observations, requested_by, diagnosis, age_years, completed)
+            VALUES (?,?,?,?,?,?,?,?,?)
+        """, (patient_id, date_str, sample_date_str, user_id, observations, requested_by, diagnosis, age_value, 0))
         order_id = self.cur.lastrowid
         for name in test_names:
             if name in self.test_map:
@@ -248,7 +263,7 @@ class LabDB:
     def get_order_details(self, order_id):
         self.cur.execute("""
             SELECT p.first_name, p.last_name, p.doc_type, p.doc_number, p.birth_date, p.sex, p.origin, p.hcl,
-                   o.date, o.observations, o.requested_by, o.diagnosis, o.age_years, o.emitted, o.emitted_at
+                   o.date, o.sample_date, o.observations, o.requested_by, o.diagnosis, o.age_years, o.emitted, o.emitted_at
             FROM orders o
             JOIN patients p ON o.patient_id = p.id
             WHERE o.id = ?
@@ -257,7 +272,7 @@ class LabDB:
         if not header:
             return None
         (first_name, last_name, doc_type, doc_number, birth_date, sex, origin, hcl,
-         date, obs, req_by, diag, age_years, emitted, emitted_at) = header
+         date, sample_date, obs, req_by, diag, age_years, emitted, emitted_at) = header
         patient_info = {
             "name": f"{(first_name or '').upper()} {(last_name or '').upper()}".strip(),
             "doc_type": doc_type,
@@ -269,6 +284,7 @@ class LabDB:
         }
         order_info = {
             "date": date,
+            "sample_date": sample_date,
             "observations": obs,
             "requested_by": req_by,
             "diagnosis": diag,
@@ -356,8 +372,8 @@ class LabDB:
     def get_results_in_range(self, start_datetime, end_datetime):
         self.cur.execute(
             """
-            SELECT o.id, o.date, p.first_name, p.last_name, p.doc_type, p.doc_number,
-                   p.sex, p.birth_date, o.age_years, t.name, t.category, ot.result
+            SELECT o.id, o.date, o.sample_date, p.first_name, p.last_name, p.doc_type, p.doc_number,
+                   p.sex, p.birth_date, p.hcl, o.age_years, o.observations, t.name, t.category, ot.result
             FROM order_tests ot
             JOIN orders o ON ot.order_id = o.id
             JOIN patients p ON o.patient_id = p.id
@@ -426,9 +442,9 @@ class LabDB:
             return []
         params = [doc_number]
         query = """
-            SELECT o.id, o.date, t.name, ot.result, t.category,
+            SELECT o.id, o.date, o.sample_date, t.name, ot.result, t.category,
                    p.first_name, p.last_name, p.doc_type, p.doc_number,
-                   p.sex, p.birth_date, o.age_years, o.emitted, o.emitted_at
+                   p.sex, p.birth_date, p.hcl, o.age_years, o.observations, o.emitted, o.emitted_at
             FROM orders o
             JOIN patients p ON o.patient_id = p.id
             JOIN order_tests ot ON ot.order_id = o.id

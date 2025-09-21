@@ -1,0 +1,1129 @@
+diff --git a/main_window.py b/main_window.py
+index aa31832c48e5367ed17f089330a37152b5fefe28..727968e063294b4dcf0ab2f5b3b35893b6ab4e69 100644
+--- a/main_window.py
++++ b/main_window.py
+@@ -1,42 +1,140 @@
+ # main_window.py
+ import copy
+ import datetime
+ import json
+ import os
+ import re
+ import unicodedata
+ from collections import OrderedDict
+ from PyQt5.QtWidgets import (QMainWindow, QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout,
+                              QStackedWidget, QFormLayout, QScrollArea, QGroupBox, QComboBox,
+                              QLineEdit, QTextEdit, QTableWidget, QTableWidgetItem, QFileDialog, QMessageBox, QCheckBox,
+                              QDateEdit, QRadioButton, QButtonGroup, QDialog, QDialogButtonBox, QListWidget, QListWidgetItem)
+ from PyQt5.QtCore import QDate, QDateTime, Qt, QTimer
+ from fpdf import FPDF  # Asegúrese de tener fpdf instalado (pip install fpdf)
+ 
+ LAB_TITLE = "Laboratorio P.S. Iñapari - 002789"
+ 
++REGISTRY_ABBREVIATIONS = {
++    "hematocrito": "Hto",
++    "hematocrito (hto)": "Hto",
++    "hemoglobina": "Hb",
++    "hemoglobina (hb)": "Hb",
++    "leucocitos": "Leu",
++    "leucocitos totales": "Leu",
++    "recuento de leucocitos": "Leu",
++    "recuento de hematies": "RBC",
++    "recuento de hematies (rbc)": "RBC",
++    "hematies": "RBC",
++    "plaquetas": "Plaq",
++    "recuento de plaquetas": "Plaq",
++    "plaquetas totales": "Plaq",
++    "vcm": "VCM",
++    "hcm": "HCM",
++    "chcm": "CHCM",
++    "rdw": "RDW",
++    "segmentados": "Seg",
++    "abastonados": "Abast",
++    "linfocitos": "Lin",
++    "monocitos": "Mon",
++    "eosinofilos": "Eo",
++    "eosinofilos": "Eo",
++    "basofilos": "Bas",
++    "mielocitos": "Mielo",
++    "metamielocitos": "Meta",
++    "otras anormalidades": "Otras",
++    "observaciones microscopicas": "Obs mic",
++    "observaciones": "Obs",
++    "glucosa": "Glu",
++    "glucosa en ayunas": "Glu ay",
++    "glucosa 2 h postprandial": "Glu 2h",
++    "glucosa postprandial": "Glu pp",
++    "glucosa 60 min": "Glu60",
++    "glucosa 120 min": "Glu120",
++    "glucosa 180 min": "Glu180",
++    "colesterol total": "ColT",
++    "trigliceridos": "Trig",
++    "colesterol hdl": "HDL",
++    "colesterol ldl": "LDL",
++    "transaminasa glutamico oxalacetica (tgo)": "TGO",
++    "transaminasa glutamico piruvico (tgp)": "TGP",
++    "tgo": "TGO",
++    "tgp": "TGP",
++    "bilirrubina total": "BilT",
++    "bilirrubina directa": "BilD",
++    "urea": "Urea",
++    "creatinina": "Crea",
++    "proteina de 24 horas": "Prot24h",
++    "fosfatasa alcalina": "FosfAlc",
++    "acido urico": "AcUr",
++    "proteinas totales": "ProtTot",
++    "albumina": "Alb",
++    "amilasa": "Amil",
++    "lipasa": "Lip",
++    "gamma glutamil transferasa (ggt)": "GGT",
++    "ggt": "GGT",
++    "globulina": "Glob",
++    "ferritina": "Ferr",
++    "hemoglobina glicosilada": "HbA1c",
++    "factor reumatoideo": "FR",
++    "proteina c reactiva": "PCR",
++    "resultado": "Res",
++    "interpretacion": "Interp",
++    "hora de toma/envio": "Hora toma",
++    "destino / referencia": "Destino",
++    "destino": "Destino",
++    "observaciones (laboratorio)": "Obs",
++    "observaciones adicionales": "Obs",
++    "eritrocitos": "RBC",
++    "eritrocitos totales": "RBC",
++    "leucocitos/c": "Leu/c",
++    "hematies/c": "Hto/c",
++    "ph": "pH",
++    "ph vaginal": "pH",
++    "color": "Color",
++    "aspecto": "Aspecto",
++    "olor": "Olor",
++    "densidad": "Dens",
++    "protein as": "Prot",
++    "proteinas": "Prot",
++    "nitritos": "Nit",
++    "glucosa (quimico)": "Glu",
++    "cetonas": "Cet",
++    "urobilinogeno": "Urob",
++    "bilirrubina": "Bil",
++    "leucocitos quimico": "Leu",
++    "leucocitos/campo": "Leu/c",
++    "celulas epiteliales/c": "Cel epi",
++    "cilindros/c": "Cil",
++    "otros hallazgos": "Otros",
++    "parasitos": "Par",
++    "levaduras": "Lev",
++    "moco": "Moco",
++    "consistencia": "Cons"
++}
++
+ # Definiciones de plantillas de resultados estructurados por examen
+ HEMOGRAM_BASE_FIELDS = [
+     {
+         "key": "hematocrito",
+         "label": "Hematocrito (Hto)",
+         "unit": "%",
+         "reference": (
+             "RN: 44-65 %\n"
+             "Niños 1-10 a: 35-45 %\n"
+             "Hombres adultos: 40-54 %\n"
+             "Mujeres adultas: 36-47 %\n"
+             "Gestantes (2°-3° trim): 33-43 %"
+         ),
+         "placeholder": "Ej. 42.5"
+     },
+     {
+         "key": "hemoglobina",
+         "label": "Hemoglobina (Hb)",
+         "unit": "g/dL",
+         "reference": (
+             "RN: 14.0-24.0 g/dL\n"
+             "1-12 meses: 10.0-12.5 g/dL\n"
+             "Niños 1-12 años: 11.5-15.5 g/dL\n"
+             "Mujeres adultas: 12.0-16.0 g/dL\n"
+             "Hombres adultos: 13.5-17.5 g/dL\n"
+diff --git a/main_window.py b/main_window.py
+index aa31832c48e5367ed17f089330a37152b5fefe28..727968e063294b4dcf0ab2f5b3b35893b6ab4e69 100644
+--- a/main_window.py
++++ b/main_window.py
+@@ -1049,50 +1147,63 @@ class MainWindow(QMainWindow):
+         self.input_origin_other.setPlaceholderText("Especifique procedencia")
+         self.input_origin_other.setEnabled(False)
+         origin_layout = QHBoxLayout()
+         origin_layout.addWidget(self.origin_combo)
+         origin_layout.addWidget(self.input_origin_other)
+         form_layout.addRow("Procedencia:", origin_layout)
+         self.input_hcl = QLineEdit(); form_layout.addRow("HCL:", self.input_hcl)
+         self.input_height = QLineEdit(); self.input_height.setPlaceholderText("cm")
+         form_layout.addRow("Talla (cm):", self.input_height)
+         self.input_weight = QLineEdit(); self.input_weight.setPlaceholderText("kg")
+         form_layout.addRow("Peso (kg):", self.input_weight)
+         self.input_blood_pressure = QLineEdit(); self.input_blood_pressure.setPlaceholderText("ej. 120/80")
+         form_layout.addRow("Presión Art.:", self.input_blood_pressure)
+         self.input_diagnosis = QLineEdit(); self.input_diagnosis.setPlaceholderText("Ej. Síndrome febril")
+         form_layout.addRow("Diagnóstico presuntivo:", self.input_diagnosis)
+         self.input_observations = QLineEdit()
+         self.input_observations.setPlaceholderText("Observaciones (laboratorio)")
+         self.input_observations.setText("N/A")
+         obs_layout = QHBoxLayout()
+         obs_layout.addWidget(self.input_observations)
+         btn_obs_na = QPushButton("Sin obs.")
+         btn_obs_na.setFixedWidth(90)
+         btn_obs_na.clicked.connect(lambda: self.input_observations.setText("N/A"))
+         obs_layout.addWidget(btn_obs_na)
+         form_layout.addRow("Observaciones:", obs_layout)
++        self.sample_date_edit = QDateEdit()
++        self.sample_date_edit.setDisplayFormat("dd-MM-yyyy")
++        self.sample_date_edit.setCalendarPopup(True)
++        self.sample_date_edit.setDate(QDate.currentDate())
++        self.sample_today_checkbox = QCheckBox("Hoy")
++        self.sample_today_checkbox.setChecked(True)
++        self.sample_today_checkbox.stateChanged.connect(self.on_sample_today_toggle)
++        self.sample_date_edit.setEnabled(False)
++        sample_layout = QHBoxLayout()
++        sample_layout.addWidget(self.sample_date_edit)
++        sample_layout.addWidget(self.sample_today_checkbox)
++        sample_layout.addStretch()
++        form_layout.addRow("F. muestra:", sample_layout)
+         self.input_requested_by = QComboBox()
+         self.input_requested_by.setEditable(True)
+         self.input_requested_by.setInsertPolicy(QComboBox.NoInsert)
+         self.input_requested_by.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+         form_layout.addRow("Solicitante:", self.input_requested_by)
+         # Placeholder después de crear el combo editable
+         if self.input_requested_by.lineEdit():
+             self.input_requested_by.lineEdit().setPlaceholderText("Seleccione o escriba el médico solicitante")
+         self.populate_requesters()
+         top_layout.addLayout(form_layout)
+         # Listado de pruebas por categoría (con scroll)
+         tests_scroll = QScrollArea(); tests_scroll.setWidgetResizable(True)
+         tests_container = QWidget(); tests_layout = QVBoxLayout(tests_container)
+         # Obtener pruebas agrupadas por categoría de la BD
+         categories = {}
+         self.labdb.cur.execute("SELECT category, name FROM tests")
+         for cat, name in self.labdb.cur.fetchall():
+             categories.setdefault(cat, []).append(name)
+         for cat, tests in categories.items():
+             group_box = QGroupBox(cat)
+             group_layout = QVBoxLayout()
+             for test_name in tests:
+                 cb = QCheckBox(test_name)
+                 group_layout.addWidget(cb)
+             group_box.setLayout(group_layout)
+diff --git a/main_window.py b/main_window.py
+index aa31832c48e5367ed17f089330a37152b5fefe28..727968e063294b4dcf0ab2f5b3b35893b6ab4e69 100644
+--- a/main_window.py
++++ b/main_window.py
+@@ -1130,50 +1241,57 @@ class MainWindow(QMainWindow):
+                 self.input_requested_by.addItem(current_text)
+                 idx = self.input_requested_by.count() - 1
+             if idx >= 0:
+                 self.input_requested_by.setCurrentIndex(idx)
+         else:
+             self.input_requested_by.setCurrentIndex(0)
+         if self.input_requested_by.lineEdit():
+             if self.input_requested_by.currentIndex() <= 0:
+                 self.input_requested_by.lineEdit().clear()
+             else:
+                 self.input_requested_by.lineEdit().setText(self.input_requested_by.currentText())
+             self.input_requested_by.lineEdit().setPlaceholderText("Seleccione o escriba el médico solicitante")
+     def update_age_from_birth_date(self, qdate=None):
+         if qdate is None:
+             qdate = self.input_birth_date.date()
+         if isinstance(qdate, QDate) and qdate.isValid():
+             years = max(0, qdate.daysTo(QDate.currentDate()) // 365)
+             self.input_age.setText(str(years))
+         else:
+             self.input_age.clear()
+     def on_origin_changed(self, index):
+         use_other = self.origin_combo.currentText() == "Otros"
+         self.input_origin_other.setEnabled(use_other)
+         if not use_other:
+             self.input_origin_other.clear()
++
++    def on_sample_today_toggle(self, state):
++        use_today = state == Qt.Checked
++        if hasattr(self, 'sample_date_edit'):
++            self.sample_date_edit.setEnabled(not use_today)
++            if use_today:
++                self.sample_date_edit.setDate(QDate.currentDate())
+     def get_current_origin(self):
+         if self.origin_combo.currentText() == "Otros":
+             other = self.input_origin_other.text().strip()
+             return other if other else "Otros"
+         return "P.S Iñapari"
+     def set_origin_value(self, value):
+         if value and value.strip().lower() not in ("p.s iñapari", "ps iñapari", "p.s. iñapari"):
+             self.origin_combo.setCurrentIndex(1)
+             self.input_origin_other.setEnabled(True)
+             self.input_origin_other.setText(value)
+         else:
+             self.origin_combo.setCurrentIndex(0)
+             self.input_origin_other.setEnabled(False)
+             self.input_origin_other.clear()
+     def _format_number(self, value):
+         if value in (None, ""):
+             return ""
+         if isinstance(value, float):
+             if value.is_integer():
+                 return str(int(value))
+             return f"{value:.2f}".rstrip('0').rstrip('.')
+         return str(value)
+     def autofill_patient(self):
+         doc_type = self.input_doc_type.currentText()
+         doc_number = self.input_doc_number.text().strip()
+diff --git a/main_window.py b/main_window.py
+index aa31832c48e5367ed17f089330a37152b5fefe28..727968e063294b4dcf0ab2f5b3b35893b6ab4e69 100644
+--- a/main_window.py
++++ b/main_window.py
+@@ -1236,89 +1354,103 @@ class MainWindow(QMainWindow):
+         bp = self.input_blood_pressure.text().strip()
+         diagnosis = self.input_diagnosis.text().strip()
+         observations = self.input_observations.text().strip() or "N/A"
+         requested_by_text = self.input_requested_by.currentText().strip() if self.input_requested_by.count() else ""
+         if requested_by_text == "":
+             requested_by_text = "N/A"
+         if diagnosis == "":
+             diagnosis = "N/A"
+         age_text = self.input_age.text().strip()
+         if age_text:
+             try:
+                 age_years = int(age_text)
+             except ValueError:
+                 QMessageBox.warning(self, "Edad inválida", "Ingrese la edad en años utilizando solo números enteros.")
+                 return
+         else:
+             age_years = None
+         try:
+             height_val = float(height) if height else None
+         except:
+             height_val = None
+         try:
+             weight_val = float(weight) if weight else None
+         except:
+             weight_val = None
++        sample_date = None
++        if hasattr(self, 'sample_date_edit'):
++            qdate = self.sample_date_edit.date()
++            if isinstance(qdate, QDate) and qdate.isValid():
++                sample_date = qdate.toString("yyyy-MM-dd")
++        if hasattr(self, 'sample_today_checkbox') and self.sample_today_checkbox.isChecked():
++            sample_date = QDate.currentDate().toString("yyyy-MM-dd")
+         # Insertar o actualizar paciente en BD
+         patient_id = self.labdb.add_or_update_patient(doc_type, doc_number, first_name, last_name, birth_date, sex, origin, hcl, height_val, weight_val, bp)
+         # Obtener lista de pruebas seleccionadas
+         selected_tests = []
+         for cb in self.page_registro.findChildren(QCheckBox):
+             if cb.isChecked():
+                 selected_tests.append(cb.text())
+         if not selected_tests:
+             QMessageBox.warning(self, "Sin pruebas", "Seleccione al menos una prueba.")
+             return
+         # Crear orden en BD con las pruebas seleccionadas
+         order_id = self.labdb.add_order_with_tests(
+             patient_id,
+             selected_tests,
+             self.user['id'],
+             observations=observations,
+             requested_by=requested_by_text,
+             diagnosis=diagnosis,
+-            age_years=age_years
++            age_years=age_years,
++            sample_date=sample_date
+         )
+         QMessageBox.information(self, "Registro exitoso", f"Paciente y pruebas registrados (Orden #{order_id}).")
+         # Habilitar botón para ir a anotar resultados de esta orden
+         btn_to_results.setEnabled(True)
+         self.last_order_registered = order_id
+         # Actualizar historial de solicitantes para próximas atenciones
+         self.populate_requesters(keep_current=True)
+     def clear_registration_form(self):
+         # Limpiar todos los campos del formulario de registro
+         self.input_doc_number.clear(); self.input_first_name.clear(); self.input_last_name.clear()
+         self.input_birth_date.blockSignals(True)
+         self.input_birth_date.setDate(QDate.currentDate())
+         self.input_birth_date.blockSignals(False)
+         self.input_age.clear()
+         self.sex_male_radio.setChecked(True)
+         self.set_origin_value("P.S Iñapari")
+         self.input_hcl.clear()
+         self.input_height.clear(); self.input_weight.clear(); self.input_blood_pressure.clear()
+         self.input_diagnosis.clear()
+         self.input_observations.setText("N/A")
++        if hasattr(self, 'sample_date_edit'):
++            self.sample_date_edit.blockSignals(True)
++            self.sample_date_edit.setDate(QDate.currentDate())
++            self.sample_date_edit.blockSignals(False)
++        if hasattr(self, 'sample_today_checkbox'):
++            self.sample_today_checkbox.setChecked(True)
+         if self.input_requested_by.count():
+             self.input_requested_by.setCurrentIndex(0)
+         if self.input_requested_by.lineEdit():
+             self.input_requested_by.lineEdit().clear()
+         for cb in self.page_registro.findChildren(QCheckBox):
+             cb.setChecked(False)
+     def go_to_results(self):
+         # Navegar a la página de resultados para la última orden registrada
+         if self.last_order_registered:
+             self.stack.setCurrentWidget(self.page_resultados)
+             self.populate_pending_orders()
+             # Seleccionar automáticamente la orden recién creada en el combo
+             self._select_order_in_combo(self.combo_orders, self.last_order_registered)
+             self.load_order_fields()
+     def init_resultados_page(self):
+         layout = QVBoxLayout(self.page_resultados)
+         search_layout = QHBoxLayout()
+         search_label = QLabel("Buscar:")
+         self.order_search_input = QLineEdit()
+         self.order_search_input.setPlaceholderText("Nombre, documento o # de orden")
+         search_layout.addWidget(search_label)
+         search_layout.addWidget(self.order_search_input, 1)
+         sort_label = QLabel("Ordenar:")
+         self.pending_sort_combo = QComboBox()
+         self.pending_sort_combo.addItems([
+diff --git a/main_window.py b/main_window.py
+index aa31832c48e5367ed17f089330a37152b5fefe28..727968e063294b4dcf0ab2f5b3b35893b6ab4e69 100644
+--- a/main_window.py
++++ b/main_window.py
+@@ -1972,101 +2104,322 @@ class MainWindow(QMainWindow):
+             return [f"{test_name}:"] + value_lines
+         text_value = parsed.get("value", raw_result or "")
+         if isinstance(text_value, str):
+             text_value = text_value.strip()
+             if text_value == "":
+                 return []
+         elif self._is_blank_result(text_value):
+             return []
+         return [f"{test_name}: {text_value}"]
+     def _format_result_for_export(self, test_name, raw_result, context=None):
+         lines = self._format_result_lines(test_name, raw_result, context=context)
+         if not lines:
+             return ""
+         if len(lines) <= 1:
+             line = lines[0]
+             parts = line.split(": ", 1)
+             return parts[1] if len(parts) > 1 else line
+         cleaned = []
+         for line in lines[1:]:
+             stripped = line.strip()
+             if stripped.endswith(":") and "•" not in stripped:
+                 continue
+             cleaned.append(stripped.replace("• ", ""))
+         return " | ".join(cleaned)
+ 
++    def _build_registry_summary(self, test_name, raw_result, context=None):
++        sections = self._collect_registry_sections(test_name, raw_result, context=context)
++        if not sections:
++            return []
++        lines = []
++        for pairs in sections:
++            processed_pairs = self._post_process_registry_pairs(pairs)
++            parts = []
++            for entry in processed_pairs:
++                label = entry.get("label", "")
++                value = entry.get("value", "")
++                if not value:
++                    continue
++                if label:
++                    parts.append(f"{label}: {value}")
++                else:
++                    parts.append(str(value))
++            if parts:
++                lines.append(", ".join(parts))
++        return lines
++
++    def _collect_registry_sections(self, test_name, raw_result, context=None):
++        parsed = self._parse_stored_result(raw_result)
++        template_key = parsed.get("template") if isinstance(parsed, dict) else None
++        template = TEST_TEMPLATES.get(template_key) if template_key in TEST_TEMPLATES else TEST_TEMPLATES.get(test_name)
++        if parsed.get("type") == "structured" and template:
++            values = parsed.get("values", {})
++            sections = []
++            current_section = []
++            for field_def in template.get("fields", []):
++                if field_def.get("type") == "section":
++                    if current_section:
++                        sections.append(current_section)
++                        current_section = []
++                    continue
++                key = field_def.get("key")
++                if not key:
++                    continue
++                value = values.get(key, "")
++                normalized_value = self._normalize_registry_value(value)
++                if normalized_value is None:
++                    continue
++                label = field_def.get("label", key)
++                short_label = self._abbreviate_registry_label(label, key)
++                current_section.append({
++                    "label": short_label,
++                    "value": normalized_value,
++                    "key": key
++                })
++            if current_section:
++                sections.append(current_section)
++            return sections
++        text_value = parsed.get("value", raw_result or "")
++        if isinstance(text_value, str):
++            text_value = text_value.strip()
++        if not text_value:
++            return []
++        label = self._abbreviate_registry_label(test_name)
++        normalized_value = self._normalize_registry_value(text_value)
++        if normalized_value is None:
++            return []
++        return [[{"label": label, "value": normalized_value, "key": None}]]
++
++    def _normalize_registry_value(self, value):
++        if value in (None, ""):
++            return None
++        if isinstance(value, str):
++            cleaned = " ".join(value.split())
++            return cleaned if cleaned else None
++        if isinstance(value, (int, float)):
++            return self._format_decimal(value)
++        return str(value).strip() or None
++
++    def _abbreviate_registry_label(self, label, key=None):
++        candidates = []
++        if key:
++            candidates.append(self._normalize_text(key))
++        if label:
++            candidates.append(self._normalize_text(label))
++        for candidate in candidates:
++            if candidate in REGISTRY_ABBREVIATIONS:
++                return REGISTRY_ABBREVIATIONS[candidate]
++        if label:
++            base = label.split('(')[0].strip()
++            if len(base) <= 6:
++                return base
++            words = base.split()
++            if len(words) == 1:
++                return words[0][:4].capitalize()
++            abbreviation = "".join(word[0] for word in words[:2]).upper()
++            if len(abbreviation) >= 2:
++                return abbreviation
++            return base[:4].capitalize()
++        if key:
++            return key
++        return ""
++
++    def _post_process_registry_pairs(self, pairs):
++        if not pairs:
++            return []
++        processed = list(pairs)
++        processed = self._ensure_hematocrit_pair(processed)
++        return processed
++
++    def _ensure_hematocrit_pair(self, pairs):
++        hematocrit_index = None
++        hemoglobin_index = None
++        for idx, entry in enumerate(pairs):
++            if entry.get("key") == "hematocrito":
++                hematocrit_index = idx
++            if entry.get("key") == "hemoglobina":
++                hemoglobin_index = idx
++        if hematocrit_index is None:
++            return pairs
++        hematocrit_value = self._extract_numeric_value(pairs[hematocrit_index].get("value"))
++        hemoglobin_present = False
++        if hemoglobin_index is not None and pairs[hemoglobin_index].get("value") not in (None, ""):
++            hemoglobin_present = True
++        if hematocrit_value is not None and not hemoglobin_present:
++            hb_value = self._format_decimal(hematocrit_value / 3.03)
++            hb_entry = {
++                "label": self._abbreviate_registry_label("Hemoglobina", "hemoglobina"),
++                "value": hb_value,
++                "key": "hemoglobina"
++            }
++            insert_index = hematocrit_index + 1
++            pairs = pairs[:insert_index] + [hb_entry] + pairs[insert_index:]
++            hemoglobin_index = insert_index
++        if hemoglobin_index is not None and hemoglobin_index != hematocrit_index + 1:
++            hb_entry = pairs.pop(hemoglobin_index)
++            insert_index = min(hematocrit_index + 1, len(pairs))
++            pairs.insert(insert_index, hb_entry)
++        return pairs
++
++    def _extract_numeric_value(self, text):
++        if text in (None, ""):
++            return None
++        match = re.search(r'-?\d+(?:[\.,]\d+)?', str(text))
++        if not match:
++            return None
++        try:
++            return float(match.group(0).replace(',', '.'))
++        except ValueError:
++            return None
++
++    def _format_decimal(self, value, decimals=2):
++        try:
++            number = float(value)
++        except (TypeError, ValueError):
++            return str(value)
++        formatted = f"{number:.{decimals}f}"
++        if "." in formatted:
++            formatted = formatted.rstrip('0').rstrip('.')
++        return formatted
++
+     def _map_category_group(self, category):
+         normalized = (category or "").strip().upper()
+         if normalized == "HEMATOLOGÍA":
+             return "hematology"
+         if normalized == "BIOQUÍMICA":
+             return "biochemistry"
+         if normalized in {"MICROBIOLOGÍA", "PARASITOLOGÍA", "MICROSCOPÍA"}:
+             return "micro_parasito"
+         return "others"
+ 
+     def _aggregate_results_by_order(self, records):
+         group_keys = ["hematology", "biochemistry", "micro_parasito", "others"]
+         aggregated = []
+         grouped = OrderedDict()
+         for record in records:
+-            result_value = record.get("result", "")
+-            if isinstance(result_value, str):
+-                if result_value.strip() == "":
+-                    continue
+-            elif self._is_blank_result(result_value):
++            summary_items = record.get("summary_items")
++            if not summary_items:
++                result_value = record.get("result", "")
++                if isinstance(result_value, str) and result_value.strip():
++                    summary_items = [result_value.strip()]
++                elif not self._is_blank_result(result_value):
++                    summary_items = [str(result_value)]
++            if not summary_items:
+                 continue
+             order_id = record.get("order_id")
+             if order_id is None:
+                 continue
+             entry = grouped.get(order_id)
+             if not entry:
+                 entry = {
+                     "order_id": order_id,
+                     "date": record.get("date", ""),
++                    "order_date_raw": record.get("order_date_raw"),
++                    "sample_date_raw": record.get("sample_date_raw"),
+                     "patient": record.get("patient", ""),
+                     "document": record.get("document", ""),
++                    "doc_type": record.get("doc_type"),
++                    "doc_number": record.get("doc_number"),
++                    "birth_date": record.get("birth_date"),
++                    "hcl": record.get("hcl"),
+                     "age": record.get("age", ""),
++                    "first_name": record.get("first_name"),
++                    "last_name": record.get("last_name"),
++                    "observations": record.get("order_observations"),
+                     "emitted": record.get("emitted"),
+                     "emitted_at": record.get("emitted_at"),
+                     "groups": {key: [] for key in group_keys}
+                 }
+                 grouped[order_id] = entry
+             group_key = self._map_category_group(record.get("category"))
+-            test_name = record.get("test") or ""
+-            result_text = record.get("result", "")
+-            summary = test_name
+-            if test_name and result_text:
+-                summary = f"{test_name}: {result_text}"
+-            elif result_text:
+-                summary = result_text
+-            entry["groups"].setdefault(group_key, []).append(summary.strip())
++            for item in summary_items:
++                cleaned = str(item).strip()
++                if cleaned:
++                    entry["groups"].setdefault(group_key, []).append(cleaned)
+         for entry in grouped.values():
++            obs_text = entry.get("observations")
++            if obs_text:
++                obs_clean = " ".join(str(obs_text).split())
++                if obs_clean and obs_clean.lower() not in {"n/a", "na", "-"}:
++                    entry["groups"].setdefault("others", []).append(f"Obs: {obs_clean}")
+             if any(entry["groups"].get(key) for key in group_keys):
+                 aggregated.append(entry)
+         return aggregated
+ 
++    def _format_short_date(self, value):
++        if not value:
++            return "—"
++        if isinstance(value, datetime.date) and not isinstance(value, datetime.datetime):
++            return value.strftime("%d/%m/%y")
++        for fmt in ("%Y-%m-%d", "%Y-%m-%d %H:%M:%S"):
++            try:
++                parsed = datetime.datetime.strptime(value, fmt)
++                return parsed.strftime("%d/%m/%y")
++            except (ValueError, TypeError):
++                continue
++        try:
++            parsed = datetime.datetime.fromisoformat(str(value))
++            return parsed.strftime("%d/%m/%y")
++        except Exception:
++            return str(value)
++
++    def _format_patient_block_for_registry(self, entry):
++        def clean(text):
++            if not text:
++                return ""
++            return " ".join(str(text).split())
++        def to_title(text):
++            return text.title() if text else ""
++        first = to_title(clean(entry.get("first_name")))
++        last = to_title(clean(entry.get("last_name")))
++        if last and first:
++            name_line = f"{last}, {first}"
++        elif last:
++            name_line = last
++        elif first:
++            name_line = first
++        else:
++            fallback = clean(entry.get("patient"))
++            name_line = to_title(fallback) if fallback else "—"
++        doc_type_value = entry.get("doc_type")
++        doc_label = doc_type_value.upper() if doc_type_value else "Doc."
++        doc_number = clean(entry.get("doc_number")) or "—"
++        doc_line = f"{doc_label}: {doc_number}" if doc_label else f"Documento: {doc_number}"
++        birth_line = f"F. Nac.: {self._format_short_date(entry.get('birth_date'))}"
++        hcl_value = clean(entry.get("hcl")) or "—"
++        hcl_line = f"HCL: {hcl_value}"
++        return "\n".join([name_line or "—", doc_line, birth_line, hcl_line])
++
++    def _format_date_for_registry(self, entry):
++        sample = entry.get("sample_date_raw")
++        if sample:
++            formatted = self._format_short_date(sample)
++            if formatted:
++                return formatted
++        raw_date = entry.get("order_date_raw") or entry.get("date")
++        return self._format_short_date(raw_date)
++
+     def _format_emission_status(self, emitted_flag, emitted_at):
+         if emitted_flag:
+             if emitted_at:
+                 try:
+                     parsed = datetime.datetime.strptime(emitted_at, "%Y-%m-%d %H:%M:%S")
+                     return f"Sí ({parsed.strftime('%d/%m/%Y')})"
+                 except Exception:
+                     return "Sí"
+             return "Sí"
+         if emitted_flag == 0:
+             return "No"
+         return "-"
+     def _calculate_age_years(self, patient_info, order_info):
+         age_value = order_info.get('age_years') if isinstance(order_info, dict) else None
+         if age_value is not None:
+             try:
+                 return int(age_value)
+             except (TypeError, ValueError):
+                 age_value = None
+         if age_value is None:
+             birth_date = patient_info.get('birth_date') if isinstance(patient_info, dict) else None
+             if birth_date:
+                 bd = QDate.fromString(birth_date, "yyyy-MM-dd")
+                 if bd.isValid():
+                     age_value = bd.daysTo(QDate.currentDate()) // 365
+diff --git a/main_window.py b/main_window.py
+index aa31832c48e5367ed17f089330a37152b5fefe28..727968e063294b4dcf0ab2f5b3b35893b6ab4e69 100644
+--- a/main_window.py
++++ b/main_window.py
+@@ -2909,77 +3262,112 @@ class MainWindow(QMainWindow):
+             description = f"Últimos 30 días ({start_date.strftime('%d/%m/%Y')} al {end_date.strftime('%d/%m/%Y')})"
+         else:  # Rango personalizado
+             if hasattr(self, 'start_date_edit') and hasattr(self, 'end_date_edit'):
+                 start_q = self.start_date_edit.date()
+                 end_q = self.end_date_edit.date()
+                 if start_q.isValid():
+                     start_date = datetime.date(start_q.year(), start_q.month(), start_q.day())
+                 if end_q.isValid():
+                     end_date = datetime.date(end_q.year(), end_q.month(), end_q.day())
+             if end_date < start_date:
+                 start_date, end_date = end_date, start_date
+             description = f"Del {start_date.strftime('%d/%m/%Y')} al {end_date.strftime('%d/%m/%Y')}"
+         start_dt = datetime.datetime.combine(start_date, datetime.time.min)
+         end_dt = datetime.datetime.combine(end_date, datetime.time.max)
+         return start_dt, end_dt, description
+ 
+     def load_activity_summary(self):
+         if not hasattr(self, 'activity_table'):
+             return
+         start_dt, end_dt, description = self._get_selected_range()
+         rows = self.labdb.get_results_in_range(
+             start_dt.strftime("%Y-%m-%d %H:%M:%S"),
+             end_dt.strftime("%Y-%m-%d %H:%M:%S")
+         )
+         activity_data = []
+-        for order_id, date_str, first, last, doc_type, doc_number, sex, birth_date, age_years, test_name, category, result in rows:
+-            try:
+-                order_dt = datetime.datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
+-                date_display = order_dt.strftime("%d/%m/%Y %H:%M")
+-            except Exception:
+-                date_display = date_str or "-"
++        for (
++            order_id,
++            date_str,
++            sample_date_str,
++            first,
++            last,
++            doc_type,
++            doc_number,
++            sex,
++            birth_date,
++            hcl,
++            age_years,
++            order_obs,
++            test_name,
++            category,
++            result
++        ) in rows:
++            display_date = "-"
++            if sample_date_str:
++                try:
++                    sample_dt = datetime.datetime.strptime(sample_date_str, "%Y-%m-%d")
++                    display_date = sample_dt.strftime("%d/%m/%Y")
++                except Exception:
++                    display_date = sample_date_str
++            if display_date == "-":
++                try:
++                    order_dt = datetime.datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
++                    display_date = order_dt.strftime("%d/%m/%Y %H:%M")
++                except Exception:
++                    display_date = date_str or "-"
+             patient_name = " ".join(part for part in [(first or "").upper(), (last or "").upper()] if part).strip() or "-"
+             doc_text = " ".join(part for part in (doc_type, doc_number) if part).strip() or "-"
+             age_display = str(age_years) if age_years not in (None, "") else "-"
+             context = {
+                 "patient": {"sex": sex, "birth_date": birth_date},
+                 "order": {"age_years": age_years}
+             }
+-            result_text = self._format_result_for_export(test_name, result, context=context).replace('\n', ' ')
+-            if result_text.strip() == "":
++            summary_items = self._build_registry_summary(test_name, result, context=context)
++            if not summary_items:
+                 continue
++            result_text = "; ".join(summary_items)
+             activity_data.append({
+                 "order_id": order_id,
+-                "date": date_display,
++                "date": display_date,
++                "order_date_raw": date_str,
++                "sample_date_raw": sample_date_str,
+                 "patient": patient_name,
+                 "document": doc_text,
++                "doc_type": doc_type,
++                "doc_number": doc_number,
++                "birth_date": birth_date,
++                "hcl": hcl,
+                 "age": age_display,
+                 "test": test_name,
+                 "result": result_text,
++                "summary_items": summary_items,
+                 "category": category,
++                "order_observations": order_obs,
+                 "emitted": None,
+-                "emitted_at": None
++                "emitted_at": None,
++                "first_name": first,
++                "last_name": last
+             })
+         self._activity_cache = {
+             "data": activity_data,
+             "description": description,
+             "start": start_dt,
+             "end": end_dt
+         }
+         self.activity_table.setRowCount(len(activity_data))
+         for row_idx, item in enumerate(activity_data):
+             self.activity_table.setItem(row_idx, 0, QTableWidgetItem(item["date"]))
+             order_item = QTableWidgetItem(str(item["order_id"]))
+             order_item.setTextAlignment(Qt.AlignCenter)
+             self.activity_table.setItem(row_idx, 1, order_item)
+             self.activity_table.setItem(row_idx, 2, QTableWidgetItem(item["patient"]))
+             self.activity_table.setItem(row_idx, 3, QTableWidgetItem(item["document"]))
+             age_item = QTableWidgetItem(item["age"])
+             age_item.setTextAlignment(Qt.AlignCenter)
+             self.activity_table.setItem(row_idx, 4, age_item)
+             self.activity_table.setItem(row_idx, 5, QTableWidgetItem(item["test"]))
+             self.activity_table.setItem(row_idx, 6, QTableWidgetItem(item["result"]))
+         if hasattr(self, 'activity_caption'):
+             self.activity_caption.setText(
+                 f"Registro de pruebas: {description} - {len(activity_data)} resultado(s)"
+             )
+ 
+diff --git a/main_window.py b/main_window.py
+index aa31832c48e5367ed17f089330a37152b5fefe28..727968e063294b4dcf0ab2f5b3b35893b6ab4e69 100644
+--- a/main_window.py
++++ b/main_window.py
+@@ -3023,56 +3411,57 @@ class MainWindow(QMainWindow):
+         aggregated = self._aggregate_results_by_order(data)
+         if not aggregated:
+             QMessageBox.information(self, "Sin datos", "No hay resultados con información para exportar en PDF.")
+             return
+         file_path, _ = QFileDialog.getSaveFileName(
+             self,
+             "Exportar registro",
+             "registro.pdf",
+             "Archivos PDF (*.pdf)"
+         )
+         if not file_path:
+             return
+         if not file_path.lower().endswith(".pdf"):
+             file_path += ".pdf"
+         pdf = FPDF('L', 'mm', 'A4')
+         pdf.set_margins(12, 12, 12)
+         pdf.set_auto_page_break(True, margin=14)
+         pdf.add_page()
+         pdf.set_font("Arial", 'B', 12)
+         pdf.cell(0, 8, self._ensure_latin1(LAB_TITLE), ln=1, align='C')
+         pdf.set_font("Arial", '', 9)
+         pdf.cell(0, 6, self._ensure_latin1(f"Registro de resultados - {description}"), ln=1, align='C')
+         pdf.ln(2)
+         headers = [
+             "Fecha",
+-            "Documento",
+-            "Paciente",
+-            "Pruebas realizadas",
+-            "Emitido"
++            "Datos del paciente (Apellidos y nombres / Documento / F. Nac. / HCL)",
++            "Hematología",
++            "Bioquímica",
++            "Microbiología y Parasitología",
++            "Otros exámenes / Observaciones"
+         ]
+-        column_widths = [28, 35, 52, 138, 20]
++        column_widths = [24, 74, 50, 45, 45, 35]
+         pdf.set_fill_color(220, 220, 220)
+         pdf.set_font("Arial", 'B', 7.8)
+         for header, width in zip(headers, column_widths):
+             pdf.cell(width, 6, self._ensure_latin1(header), border=1, align='C', fill=True)
+         pdf.ln(6)
+ 
+         def ensure_space(required_height):
+             if pdf.get_y() + required_height > pdf.h - pdf.b_margin:
+                 pdf.add_page()
+                 pdf.set_font("Arial", 'B', 12)
+                 pdf.cell(0, 8, self._ensure_latin1(LAB_TITLE), ln=1, align='C')
+                 pdf.set_font("Arial", '', 9)
+                 pdf.cell(0, 6, self._ensure_latin1(f"Registro de resultados - {description}"), ln=1, align='C')
+                 pdf.ln(2)
+                 pdf.set_fill_color(220, 220, 220)
+                 pdf.set_font("Arial", 'B', 7.8)
+                 for header, width in zip(headers, column_widths):
+                     pdf.cell(width, 6, self._ensure_latin1(header), border=1, align='C', fill=True)
+                 pdf.ln(6)
+                 pdf.set_font("Arial", '', 6.4)
+ 
+         def wrap_cell_text(text, available_width):
+             sanitized = self._ensure_latin1(str(text) if text not in (None, "") else "-")
+             segments = []
+             for part in sanitized.split('\n'):
+diff --git a/main_window.py b/main_window.py
+index aa31832c48e5367ed17f089330a37152b5fefe28..727968e063294b4dcf0ab2f5b3b35893b6ab4e69 100644
+--- a/main_window.py
++++ b/main_window.py
+@@ -3107,164 +3496,184 @@ class MainWindow(QMainWindow):
+             for idx, text in enumerate(texts):
+                 available = max(column_widths[idx] - 2 * padding_x, 1)
+                 lines = wrap_cell_text(text, available)
+                 cell_lines.append(lines)
+                 if len(lines) > max_lines:
+                     max_lines = len(lines)
+             row_height = max_lines * line_height + 2 * padding_y
+             ensure_space(row_height)
+             x_start = pdf.l_margin
+             y_start = pdf.get_y()
+             pdf.set_draw_color(210, 215, 226)
+             pdf.set_line_width(0.2)
+             for idx, lines in enumerate(cell_lines):
+                 cell_width = column_widths[idx]
+                 x_pos = x_start + sum(column_widths[:idx])
+                 pdf.rect(x_pos, y_start, cell_width, row_height)
+                 text_y = y_start + padding_y
+                 for line in lines:
+                     pdf.set_xy(x_pos + padding_x, text_y)
+                     pdf.cell(cell_width - 2 * padding_x, line_height, line, border=0)
+                     text_y += line_height
+             pdf.set_xy(pdf.l_margin, y_start + row_height)
+ 
+         pdf.set_font("Arial", '', 6.4)
+ 
+-        def format_tests(entry):
+-            values = []
+-            for key in ("hematology", "biochemistry", "micro_parasito", "others"):
+-                group_values = entry.get("groups", {}).get(key, [])
+-                if group_values:
+-                    values.extend(group_values)
+-            return "\n".join(values) if values else "-"
++        def group_text(entry, key):
++            values = entry.get("groups", {}).get(key, [])
++            cleaned = [" ".join(str(val).split()) for val in values if str(val).strip()]
++            return "\n".join(cleaned) if cleaned else "-"
+ 
+         for entry in aggregated:
+             ordered_cells = [
+-                entry.get("date", "-"),
+-                entry.get("document", "-"),
+-                entry.get("patient", "-"),
+-                format_tests(entry),
+-                self._format_emission_status(entry.get("emitted"), entry.get("emitted_at"))
++                self._format_date_for_registry(entry),
++                self._format_patient_block_for_registry(entry),
++                group_text(entry, "hematology"),
++                group_text(entry, "biochemistry"),
++                group_text(entry, "micro_parasito"),
++                group_text(entry, "others")
+             ]
+             render_row(ordered_cells)
+         try:
+             pdf.output(file_path)
+         except Exception as exc:
+             QMessageBox.warning(self, "Error", f"No se pudo generar el PDF:\n{exc}")
+             return
+         QMessageBox.information(self, "Exportado", f"Registro guardado en:\n{file_path}")
+ 
+     def _clear_history_table(self):
+         if hasattr(self, 'history_table'):
+             self.history_table.setRowCount(0)
+         self._history_results = []
+         if hasattr(self, 'history_open_btn'):
+             self.history_open_btn.setEnabled(False)
+ 
+     def _on_history_selection_changed(self):
+         if not hasattr(self, 'history_table'):
+             return
+         selection = self.history_table.selectionModel()
+         has_selection = bool(selection.selectedRows()) if selection else False
+         if hasattr(self, 'history_open_btn'):
+             self.history_open_btn.setEnabled(has_selection)
+ 
+     def search_patient_history(self):
+         if not hasattr(self, 'history_table'):
+             return
+         doc_number = self.history_doc_input.text().strip() if hasattr(self, 'history_doc_input') else ""
+         if doc_number == "":
+             QMessageBox.warning(self, "DNI requerido", "Ingrese un DNI para realizar la búsqueda.")
+             return
+         if not doc_number.isdigit():
+             QMessageBox.warning(self, "Formato inválido", "El DNI debe contener solo números.")
+             return
+         self._clear_history_table()
+         rows = self.labdb.get_patient_history_by_document(doc_number, "DNI")
+         records = []
+         for row in rows:
+             (
+                 order_id,
+                 date_str,
++                sample_date_str,
+                 test_name,
+                 raw_result,
+                 category,
+                 first_name,
+                 last_name,
+                 doc_type,
+                 doc_value,
+                 sex,
+                 birth_date,
++                hcl,
+                 age_years,
++                order_obs,
+                 emitted,
+                 emitted_at
+             ) = row
+-            try:
+-                order_dt = datetime.datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
+-                date_display = order_dt.strftime("%d/%m/%Y %H:%M")
+-            except Exception:
+-                date_display = date_str or "-"
++            display_date = "-"
++            if sample_date_str:
++                try:
++                    sample_dt = datetime.datetime.strptime(sample_date_str, "%Y-%m-%d")
++                    display_date = sample_dt.strftime("%d/%m/%Y")
++                except Exception:
++                    display_date = sample_date_str
++            if display_date == "-":
++                try:
++                    order_dt = datetime.datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
++                    display_date = order_dt.strftime("%d/%m/%Y %H:%M")
++                except Exception:
++                    display_date = date_str or "-"
+             patient_name = " ".join(part for part in [(first_name or "").upper(), (last_name or "").upper()] if part).strip() or "-"
+             doc_text = " ".join(part for part in (doc_type, doc_value) if part).strip() or "-"
+             age_display = str(age_years) if age_years not in (None, "") else "-"
+             context = {
+                 "patient": {"sex": sex, "birth_date": birth_date},
+                 "order": {"age_years": age_years}
+             }
+-            result_text = self._format_result_for_export(test_name, raw_result, context=context).replace('\n', ' ')
+-            if result_text.strip() == "":
++            summary_items = self._build_registry_summary(test_name, raw_result, context=context)
++            if not summary_items:
+                 continue
++            result_text = "; ".join(summary_items)
+             records.append({
+                 "order_id": order_id,
+-                "date": date_display,
++                "date": display_date,
++                "order_date_raw": date_str,
++                "sample_date_raw": sample_date_str,
+                 "patient": patient_name,
+                 "document": doc_text,
++                "doc_type": doc_type,
++                "doc_number": doc_value,
++                "birth_date": birth_date,
++                "hcl": hcl,
+                 "age": age_display,
+                 "test": test_name,
+                 "result": result_text,
++                "summary_items": summary_items,
+                 "category": category,
++                "order_observations": order_obs,
+                 "emitted": emitted,
+-                "emitted_at": emitted_at
++                "emitted_at": emitted_at,
++                "first_name": first_name,
++                "last_name": last_name
+             })
+         aggregated = self._aggregate_results_by_order(records)
+         self._history_results = aggregated
+         self.history_table.setRowCount(len(aggregated))
+         headers = [
+             "date",
+             "order_id",
+             "patient",
+             "document",
+             "age",
+             "hematology",
+             "biochemistry",
+             "micro_parasito",
+             "others",
+             "emitted"
+         ]
+         for row_idx, entry in enumerate(aggregated):
+             values = [
+-                entry.get("date", "-"),
++                self._format_date_for_registry(entry),
+                 str(entry.get("order_id", "-")),
+                 entry.get("patient", "-"),
+                 entry.get("document", "-"),
+                 entry.get("age", "-"),
+                 "\n".join(entry.get("groups", {}).get("hematology", [])) or "-",
+                 "\n".join(entry.get("groups", {}).get("biochemistry", [])) or "-",
+                 "\n".join(entry.get("groups", {}).get("micro_parasito", [])) or "-",
+                 "\n".join(entry.get("groups", {}).get("others", [])) or "-",
+                 self._format_emission_status(entry.get("emitted"), entry.get("emitted_at"))
+             ]
+             for col_idx, value in enumerate(values):
+                 item = QTableWidgetItem(str(value))
+                 if headers[col_idx] in {"order_id", "age"}:
+                     item.setTextAlignment(Qt.AlignCenter)
+                 self.history_table.setItem(row_idx, col_idx, item)
+         if not aggregated:
+             QMessageBox.information(self, "Sin resultados", "No se encontró historial con resultados registrados para este DNI.")
+         self._on_history_selection_changed()
+ 
+     def open_history_order_from_analysis(self):
+         if not hasattr(self, 'history_table'):
+             return
+         selection = self.history_table.selectionModel()
+         if not selection:
+             return
