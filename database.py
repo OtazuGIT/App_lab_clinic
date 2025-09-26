@@ -22,6 +22,9 @@ class LabDB:
                 role TEXT
             )
         """)
+        self._ensure_column_exists("users", "full_name", "TEXT")
+        self._ensure_column_exists("users", "profession", "TEXT")
+        self._ensure_column_exists("users", "license", "TEXT")
         self.cur.execute("""
             CREATE TABLE IF NOT EXISTS patients (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -100,9 +103,26 @@ class LabDB:
         self.cur.execute("SELECT COUNT(*) FROM users")
         if self.cur.fetchone()[0] == 0:
             # Crear usuario admin por defecto
-            self.cur.execute("INSERT INTO users(username, password, role) VALUES (?,?,?)",
-                             ("admin", "admin", "super"))
+            self.cur.execute(
+                "INSERT INTO users(username, password, role, full_name, profession, license) VALUES (?,?,?,?,?,?)",
+                ("admin", "admin", "super", "Kewin Otazu Mamani", "Biólogo", "C.B.P. 18165")
+            )
             self.conn.commit()
+        else:
+            self.cur.execute("SELECT full_name, profession, license FROM users WHERE username='admin'")
+            row = self.cur.fetchone()
+            if row:
+                full_name, profession, license_code = row
+                if not full_name or not profession or not license_code:
+                    self.cur.execute(
+                        "UPDATE users SET full_name=?, profession=?, license=? WHERE username='admin'",
+                        (
+                            full_name or "Kewin Otazu Mamani",
+                            profession or "Biólogo",
+                            license_code or "C.B.P. 18165"
+                        )
+                    )
+                    self.conn.commit()
         self.cur.execute("SELECT COUNT(*) FROM tests")
         if self.cur.fetchone()[0] == 0:
             tests_by_category = {
@@ -189,20 +209,50 @@ class LabDB:
         self._ensure_column_exists("order_tests", "deleted_by", "INTEGER")
         self._ensure_column_exists("order_tests", "deleted_at", "TEXT")
     def authenticate_user(self, username, password):
-        self.cur.execute("SELECT id, username, role FROM users WHERE username=? AND password=?", (username, password))
+        self.cur.execute(
+            "SELECT id, username, role, full_name, profession, license FROM users WHERE username=? AND password=?",
+            (username, password)
+        )
         row = self.cur.fetchone()
         if row:
-            uid, user, role = row
-            return {"id": uid, "username": user, "role": role}
+            uid, user, role, full_name, profession, license = row
+            return {
+                "id": uid,
+                "username": user,
+                "role": role,
+                "full_name": full_name or "",
+                "profession": profession or "",
+                "license": license or ""
+            }
         else:
             return None
-    def create_user(self, username, password, role):
+    def create_user(self, username, password, role, full_name="", profession="", license=""):
         try:
-            self.cur.execute("INSERT INTO users(username, password, role) VALUES (?,?,?)", (username, password, role))
+            self.cur.execute(
+                """
+                INSERT INTO users(username, password, role, full_name, profession, license)
+                VALUES (?,?,?,?,?,?)
+                """,
+                (username, password, role, full_name or None, profession or None, license or None)
+            )
             self.conn.commit()
             return True
         except sqlite3.IntegrityError:
             return False
+
+    def update_user_profile(self, user_id, full_name, profession, license):
+        if not user_id:
+            return False
+        self.cur.execute(
+            """
+            UPDATE users
+            SET full_name=?, profession=?, license=?
+            WHERE id=?
+            """,
+            (full_name or None, profession or None, license or None, user_id)
+        )
+        self.conn.commit()
+        return self.cur.rowcount > 0
     def find_patient(self, doc_type, doc_number):
         self.cur.execute("SELECT * FROM patients WHERE doc_type=? AND doc_number=?", (doc_type, doc_number))
         return self.cur.fetchone()

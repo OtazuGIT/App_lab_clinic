@@ -1209,6 +1209,34 @@ class MainWindow(QMainWindow):
             self.refresh_statistics()
     def _update_clock(self):
         self.clock_label.setText(QDateTime.currentDateTime().toString("dd/MM/yyyy HH:mm:ss"))
+
+    def _ensure_output_directory(self, category, filename=None):
+        base_dir = os.path.join(os.getcwd(), "documentos")
+        mapping = {
+            "informes": "informes",
+            "registros": "registros",
+            "exportaciones": "exportaciones"
+        }
+        subdir = mapping.get(category, category)
+        target_dir = os.path.join(base_dir, subdir)
+        os.makedirs(target_dir, exist_ok=True)
+        if filename:
+            return os.path.join(target_dir, filename)
+        return target_dir
+
+    def _format_user_identity_for_delivery(self):
+        lines = []
+        full_name = (self.user.get('full_name') or '').strip()
+        profession = (self.user.get('profession') or '').strip()
+        license_code = (self.user.get('license') or '').strip()
+        if full_name:
+            lines.append(full_name)
+        credentials = " / ".join(part for part in (profession, license_code) if part)
+        if credentials:
+            lines.append(credentials)
+        if not lines:
+            lines.append(self.user.get('username', ''))
+        return "\n".join(lines)
     def init_registro_page(self):
         layout = QVBoxLayout(self.page_registro)
         top_layout = QHBoxLayout()
@@ -1876,7 +1904,15 @@ class MainWindow(QMainWindow):
             return
         order_test_names = [name for (name, *_rest) in rows]
         for entry in rows:
-            test_name, raw_result, category = entry[:3]
+            (
+                test_name,
+                raw_result,
+                category,
+                sample_status,
+                sample_issue,
+                observation,
+                _entry_id
+            ) = entry
             template = None
             template_name = test_name
             if test_name == "Hematocrito":
@@ -1897,11 +1933,40 @@ class MainWindow(QMainWindow):
             container_layout = QVBoxLayout()
             header_layout = QHBoxLayout()
             header_layout.addStretch()
+            status_container = QWidget()
+            status_layout = QHBoxLayout(status_container)
+            status_layout.setContentsMargins(0, 0, 0, 0)
+            status_layout.setSpacing(6)
+            status_label = QLabel("Estado de muestra:")
+            status_combo = QComboBox()
+            status_combo.addItem("Recibida", "recibida")
+            status_combo.addItem("Pendiente", "pendiente")
+            status_combo.addItem("Rechazada", "rechazada")
+            status_value = (sample_status or "recibida").strip().lower()
+            idx = status_combo.findData(status_value)
+            if idx >= 0:
+                status_combo.setCurrentIndex(idx)
+            issue_input = QLineEdit()
+            issue_input.setPlaceholderText("Detalle / motivo (si aplica)")
+            if sample_issue:
+                issue_input.setText(str(sample_issue))
+            btn_pending = QPushButton("Marcar pendiente")
+            btn_pending.setStyleSheet("QPushButton { font-size: 10px; }")
+            status_layout.addWidget(status_label)
+            status_layout.addWidget(status_combo)
+            status_layout.addWidget(issue_input, 1)
+            status_layout.addWidget(btn_pending)
+            observation_edit = QTextEdit()
+            observation_edit.setFixedHeight(40)
+            observation_edit.setPlaceholderText("Observaciones de la muestra (opcional)")
+            if observation:
+                observation_edit.setPlainText(str(observation))
             remove_button = QPushButton("Quitar examen")
             remove_button.setStyleSheet("QPushButton { font-size: 10px; color: #c0392b; }")
             remove_button.clicked.connect(lambda _=False, name=test_name: self._prompt_remove_test(name))
             header_layout.addWidget(remove_button)
             container_layout.addLayout(header_layout)
+            container_layout.addWidget(status_container)
             group_layout = QFormLayout()
             group_layout.setLabelAlignment(Qt.AlignLeft)
             container_layout.addLayout(group_layout)
@@ -1949,6 +2014,26 @@ class MainWindow(QMainWindow):
                         }
                     }
                 }
+            group_layout.addRow("Obs. de la muestra:", observation_edit)
+            def _update_issue_state(index):
+                value = status_combo.itemData(index)
+                needs_detail = value in {"pendiente", "rechazada"}
+                issue_input.setEnabled(needs_detail)
+            status_combo.currentIndexChanged.connect(_update_issue_state)
+            _update_issue_state(status_combo.currentIndex())
+
+            def _set_pending():
+                pending_index = status_combo.findData("pendiente")
+                if pending_index >= 0:
+                    status_combo.setCurrentIndex(pending_index)
+                issue_input.setFocus()
+            btn_pending.clicked.connect(_set_pending)
+
+            self.order_fields[test_name]["meta"] = {
+                "status_widget": status_combo,
+                "issue_widget": issue_input,
+                "observation_widget": observation_edit
+            }
             self.results_layout.addWidget(group_box)
         self.results_layout.addStretch()
 
@@ -1992,11 +2077,17 @@ class MainWindow(QMainWindow):
             observation_widget = meta.get("observation_widget")
             status_value = "recibida"
             if status_combo:
-                status_value = status_combo.currentText().strip().lower() or "recibida"
+                status_data = status_combo.currentData()
+                if status_data:
+                    status_value = str(status_data).strip().lower()
+                else:
+                    status_value = status_combo.currentText().strip().lower() or "recibida"
             issue_value = issue_widget.text().strip() if issue_widget else ""
             observation_value = observation_widget.toPlainText().strip() if observation_widget else ""
             if status_value == "pendiente":
                 pending_samples += 1
+            if status_value == "recibida":
+                issue_value = ""
             if status_value in {"pendiente", "rechazada"} and not issue_value:
                 missing_notes.append(test_name)
             if template:
@@ -2621,7 +2712,8 @@ class MainWindow(QMainWindow):
                     "observations": record.get("order_observations"),
                     "emitted": record.get("emitted"),
                     "emitted_at": record.get("emitted_at"),
-                    "groups": {key: [] for key in group_keys}
+                    "groups": {key: [] for key in group_keys},
+                    "tests": []
                 }
                 grouped[order_id] = entry
             group_key = self._map_category_group(record.get("category"))
@@ -2629,6 +2721,11 @@ class MainWindow(QMainWindow):
                 cleaned = str(item).strip()
                 if cleaned:
                     entry["groups"].setdefault(group_key, []).append(cleaned)
+            test_name = record.get("test")
+            if test_name:
+                test_clean = str(test_name).strip()
+                if test_clean and test_clean not in entry.setdefault("tests", []):
+                    entry["tests"].append(test_clean)
         for entry in grouped.values():
             obs_text = entry.get("observations")
             if obs_text:
@@ -3147,7 +3244,16 @@ class MainWindow(QMainWindow):
         else:
             emission_display = "Pendiente de emisión"
         lines.append(f"FECHA DEL INFORME: {emission_display}")
-        lines.append(f"FECHA DE REGISTRO: {ord_inf.get('date') or '-'}")
+        sample_raw = ord_inf.get('sample_date')
+        if sample_raw:
+            try:
+                sample_dt = datetime.datetime.strptime(sample_raw, "%Y-%m-%d")
+                sample_display = sample_dt.strftime("%d/%m/%Y")
+            except Exception:
+                sample_display = sample_raw
+        else:
+            sample_display = "-"
+        lines.append(f"FECHA DE TOMA DE MUESTRA: {sample_display}")
         lines.append("RESULTADOS:")
         for test_name, raw_result, _, sample_status, sample_issue, observation, _ in results:
             formatted_lines = self._format_result_lines(test_name, raw_result, context=context)
@@ -3176,13 +3282,22 @@ class MainWindow(QMainWindow):
         ord_inf = info["order"]
         suggested_name = f"Orden_{order_id}.pdf"
         options = QFileDialog.Options()
-        file_path, _ = QFileDialog.getSaveFileName(self, "Guardar PDF", suggested_name, "Archivos PDF (*.pdf)", options=options)
+        default_path = self._ensure_output_directory("informes", suggested_name)
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Guardar PDF",
+            default_path,
+            "Archivos PDF (*.pdf)",
+            options=options
+        )
         if not file_path:
             return
         if not file_path.lower().endswith(".pdf"):
             file_path += ".pdf"
         existing_emission = ord_inf.get('emitted') and ord_inf.get('emitted_at')
         mark_as_emitted = False
+        is_copy = False
+        print_display = None
         if existing_emission:
             reply = QMessageBox.question(
                 self,
@@ -3198,16 +3313,26 @@ class MainWindow(QMainWindow):
                 emission_display = emission_dt.strftime("%d/%m/%Y %H:%M")
             except Exception:
                 emission_display = emission_timestamp or "-"
+            copy_time = datetime.datetime.now()
+            print_display = copy_time.strftime("%d/%m/%Y %H:%M")
+            is_copy = True
         else:
             mark_as_emitted = True
             emission_time = datetime.datetime.now()
             emission_timestamp = emission_time.strftime("%Y-%m-%d %H:%M:%S")
             emission_display = emission_time.strftime("%d/%m/%Y %H:%M")
+            print_display = emission_display
         pdf = FPDF('P', 'mm', 'A4')
         pdf.set_margins(12, 12, 12)
         pdf.set_auto_page_break(True, margin=14)
         pdf.add_page()
-        self._render_order_pdf(pdf, info, emission_display)
+        self._render_order_pdf(
+            pdf,
+            info,
+            emission_display,
+            print_display=print_display,
+            is_copy=is_copy
+        )
         try:
             pdf.output(file_path)
         except Exception as exc:
@@ -3219,7 +3344,7 @@ class MainWindow(QMainWindow):
         self.populate_completed_orders()
         self.output_text.clear()
 
-    def _render_order_pdf(self, pdf, info, emission_display):
+    def _render_order_pdf(self, pdf, info, emission_display, print_display=None, is_copy=False):
         pat = info["patient"]
         ord_inf = info["order"]
         results = info["results"]
@@ -3227,12 +3352,11 @@ class MainWindow(QMainWindow):
         doc_text = " ".join([part for part in (pat.get('doc_type'), pat.get('doc_number')) if part]) or "-"
         patient_name = (pat.get('name') or '-').upper()
         age_text = self._format_age_text(pat, ord_inf)
-        order_date_text = ord_inf.get('date') or "-"
         sex_text = (pat.get('sex') or '-').upper()
         hcl_text = (pat.get('hcl') or '-').upper()
         origin_text = (pat.get('origin') or '-').upper()
         requester_text = (ord_inf.get('requested_by') or '-').upper()
-        emission_state = "Emitido" if emission_display != "Pendiente de emisión" else "Por emitir"
+        diagnosis_text = (ord_inf.get('diagnosis') or '-').upper()
         header_image_path = os.path.join("img", "img.png")
         pregnancy_flag = pat.get('is_pregnant')
         gest_weeks = pat.get('gestational_age_weeks')
@@ -3256,12 +3380,22 @@ class MainWindow(QMainWindow):
                     pregnancy_text = f"{pregnancy_text} ({weeks_text})"
             else:
                 pregnancy_text = 'No'
+        sample_date_raw = ord_inf.get('sample_date')
+        sample_date_display = '-'
+        if sample_date_raw:
+            try:
+                sample_dt = datetime.datetime.strptime(sample_date_raw, "%Y-%m-%d")
+                sample_date_display = sample_dt.strftime("%d/%m/%Y")
+            except Exception:
+                sample_date_display = sample_date_raw
+        if not print_display:
+            print_display = emission_display
         info_pairs = [
             (("Paciente", patient_name), ("Edad", age_text)),
             (("Documento", doc_text.upper() if doc_text else "-"), ("Sexo", sex_text)),
-            (("Historia clínica", hcl_text), ("Estado de emisión", emission_state)),
-            (("Procedencia", origin_text), ("Fecha del informe", emission_display)),
-            (("Solicitante", requester_text), ("Fecha de registro", order_date_text)),
+            (("Historia clínica", hcl_text), ("Fecha del informe", emission_display)),
+            (("Procedencia", origin_text), ("Fecha de toma de muestra", sample_date_display)),
+            (("Solicitante", requester_text), ("Diagnóstico", diagnosis_text)),
         ]
         if pregnancy_text:
             info_pairs.append((("Gestante", pregnancy_text), ("FPP", due_display)))
@@ -3348,7 +3482,14 @@ class MainWindow(QMainWindow):
                 pdf.cell(0, 6, self._ensure_latin1(LAB_TITLE), ln=1, align='C')
                 pdf.ln(2)
             draw_patient_info()
-            pdf.ln(1.5)
+            pdf.ln(1.0)
+            if is_copy:
+                copy_note = f"Copia reimpresa el {print_display}" if print_display else "Copia reimpresa"
+                pdf.set_font("Arial", 'B', 8.5)
+                pdf.set_text_color(110, 110, 110)
+                pdf.cell(0, 4, self._ensure_latin1(copy_note), ln=1, align='R')
+                pdf.set_text_color(0, 0, 0)
+                pdf.ln(0.5)
 
         def ensure_space(required_height):
             if pdf.get_y() + required_height > pdf.h - pdf.b_margin:
@@ -3556,17 +3697,24 @@ class MainWindow(QMainWindow):
                 except Exception:
                     emission_display = emission_timestamp or "-"
                 mark = False
+                copy_time = datetime.datetime.now()
+                print_display = copy_time.strftime("%d/%m/%Y %H:%M")
+                is_copy = True
             else:
                 emission_time = datetime.datetime.now()
                 emission_timestamp = emission_time.strftime("%Y-%m-%d %H:%M:%S")
                 emission_display = emission_time.strftime("%d/%m/%Y %H:%M")
                 mark = True
+                print_display = emission_display
+                is_copy = False
             orders_to_emit.append({
                 "id": oid,
                 "info": info,
                 "emission_display": emission_display,
                 "emission_timestamp": emission_timestamp,
-                "mark": mark
+                "mark": mark,
+                "print_display": print_display,
+                "is_copy": is_copy
             })
         if not orders_to_emit:
             QMessageBox.information(self, "Sin datos", "Las órdenes seleccionadas no están disponibles para emitir.")
@@ -3585,7 +3733,7 @@ class MainWindow(QMainWindow):
         file_path, _ = QFileDialog.getSaveFileName(
             self,
             "Guardar lote",
-            "Resultados_lote.pdf",
+            self._ensure_output_directory("informes", "Resultados_lote.pdf"),
             "Archivos PDF (*.pdf)"
         )
         if not file_path:
@@ -3597,7 +3745,13 @@ class MainWindow(QMainWindow):
         pdf.set_auto_page_break(True, margin=14)
         for idx, entry in enumerate(orders_to_emit):
             pdf.add_page()
-            self._render_order_pdf(pdf, entry["info"], entry["emission_display"])
+            self._render_order_pdf(
+                pdf,
+                entry["info"],
+                entry["emission_display"],
+                print_display=entry.get("print_display"),
+                is_copy=entry.get("is_copy")
+            )
         try:
             pdf.output(file_path)
         except Exception as exc:
@@ -3612,7 +3766,8 @@ class MainWindow(QMainWindow):
     def export_excel(self):
         # Exportar todos los resultados a un archivo CSV (Excel puede abrirlo)
         options = QFileDialog.Options()
-        file_path, _ = QFileDialog.getSaveFileName(self, "Exportar datos", "", "Archivo CSV (*.csv)", options=options)
+        default_path = self._ensure_output_directory("exportaciones", "exportacion.csv")
+        file_path, _ = QFileDialog.getSaveFileName(self, "Exportar datos", default_path, "Archivo CSV (*.csv)", options=options)
         if not file_path:
             return
         if not file_path.lower().endswith(".csv"):
@@ -3992,7 +4147,7 @@ class MainWindow(QMainWindow):
             file_path, _ = QFileDialog.getSaveFileName(
                 self,
                 "Exportar registro",
-                "registro.csv",
+                self._ensure_output_directory("registros", "registro.csv"),
                 "Archivo CSV (*.csv)"
             )
             if not file_path:
@@ -4021,7 +4176,7 @@ class MainWindow(QMainWindow):
         file_path, _ = QFileDialog.getSaveFileName(
             self,
             "Exportar registro",
-            "registro.pdf",
+            self._ensure_output_directory("registros", "registro.pdf"),
             "Archivos PDF (*.pdf)"
         )
         if not file_path:
@@ -4159,12 +4314,170 @@ class MainWindow(QMainWindow):
                 group_text(entry, "others")
             ]
             render_row(ordered_cells)
+        cache = getattr(self, '_activity_cache', {})
+        report_start = cache.get("start")
+        report_end = cache.get("end")
+        if report_start and report_end:
+            try:
+                start_date = report_start.date() if isinstance(report_start, datetime.datetime) else report_start
+                end_date = report_end.date() if isinstance(report_end, datetime.datetime) else report_end
+            except AttributeError:
+                start_date = end_date = None
+            if start_date and end_date and start_date == end_date:
+                self._append_delivery_sheet(pdf, aggregated, start_date)
         try:
             pdf.output(file_path)
         except Exception as exc:
             QMessageBox.warning(self, "Error", f"No se pudo generar el PDF:\n{exc}")
             return
         QMessageBox.information(self, "Exportado", f"Registro guardado en:\n{file_path}")
+
+    def _append_delivery_sheet(self, pdf, aggregated, report_date):
+        if not aggregated:
+            return
+        prev_left, prev_top, prev_right, prev_bottom = pdf.l_margin, pdf.t_margin, pdf.r_margin, pdf.b_margin
+        prev_auto = pdf.auto_page_break
+        pdf.set_margins(6, 10, 6)
+        pdf.set_auto_page_break(True, margin=10)
+        pdf.add_page(orientation='L', format='A5')
+        pdf.set_font("Arial", 'B', 11)
+        pdf.cell(0, 6, self._ensure_latin1("Entrega de resultados"), ln=1, align='C')
+        base_date = report_date
+        if isinstance(base_date, datetime.datetime):
+            base_date = base_date.date()
+        if not base_date:
+            base_date = datetime.date.today()
+        pdf.set_font("Arial", '', 9)
+        pdf.cell(
+            0,
+            5,
+            self._ensure_latin1(f"Listado de pacientes - {base_date.strftime('%d/%m/%Y')}"),
+            ln=1,
+            align='C'
+        )
+        pdf.ln(1.5)
+        columns = [
+            {"title": "Fecha de entrega", "width": 24, "min_lines": 1},
+            {"title": "Paciente", "width": 42, "min_lines": 2},
+            {"title": "Pruebas entregadas", "width": 58, "min_lines": 2},
+            {"title": "Entregado por", "width": 34, "min_lines": 2},
+            {"title": "Personal que recibe / Observaciones", "width": 40, "min_lines": 3},
+        ]
+        padding_x = 1.2
+        padding_y = 1.0
+        line_height = 4.0
+
+        def wrap_text(value, available_width, min_lines=1):
+            base_text = ""
+            if value not in (None, ""):
+                base_text = self._ensure_latin1(str(value))
+            segments = [seg.strip() for seg in base_text.split('\n') if seg.strip()]
+            if not segments:
+                segments = [""]
+            lines = []
+            for segment in segments:
+                words = segment.split()
+                if not words:
+                    lines.append("")
+                    continue
+                current = words[0]
+                for word in words[1:]:
+                    candidate = f"{current} {word}"
+                    if pdf.get_string_width(candidate) <= max(available_width, 1):
+                        current = candidate
+                    else:
+                        lines.append(current)
+                        current = word
+                lines.append(current)
+            if not lines:
+                lines = [""]
+            while len(lines) < min_lines:
+                lines.append("")
+            return lines
+
+        pdf.set_draw_color(180, 180, 180)
+        pdf.set_line_width(0.2)
+        pdf.set_font("Arial", 'B', 7.6)
+        header_lines = []
+        max_header_lines = 1
+        for column in columns:
+            text_lines = wrap_text(column["title"], column["width"] - 2 * padding_x, 1)
+            header_lines.append(text_lines)
+            if len(text_lines) > max_header_lines:
+                max_header_lines = len(text_lines)
+        header_height = max_header_lines * line_height + 2 * padding_y
+        start_x = pdf.l_margin
+        start_y = pdf.get_y()
+        pdf.set_fill_color(210, 210, 210)
+        for idx, column in enumerate(columns):
+            width = column["width"]
+            pdf.rect(start_x, start_y, width, header_height, style='DF')
+            text_y = start_y + padding_y
+            for line in header_lines[idx]:
+                pdf.set_xy(start_x + padding_x, text_y)
+                pdf.cell(width - 2 * padding_x, line_height, line, border=0)
+                text_y += line_height
+            start_x += width
+        pdf.set_xy(pdf.l_margin, start_y + header_height)
+        pdf.set_font("Arial", '', 7.2)
+        deliverer_info = self._format_user_identity_for_delivery()
+        for entry in aggregated:
+            cell_values = [
+                entry.get("date") or base_date.strftime("%d/%m/%Y"),
+                entry.get("patient", "-"),
+                "\n".join(entry.get("tests", [])) if entry.get("tests") else "-",
+                deliverer_info,
+                ""
+            ]
+            wrapped = []
+            max_lines = 1
+            for column, value in zip(columns, cell_values):
+                lines = wrap_text(value, column["width"] - 2 * padding_x, column["min_lines"])
+                wrapped.append(lines)
+                if len(lines) > max_lines:
+                    max_lines = len(lines)
+            row_height = max_lines * line_height + 2 * padding_y
+            if pdf.get_y() + row_height > pdf.h - pdf.b_margin:
+                pdf.add_page(orientation='L', format='A5')
+                pdf.set_font("Arial", 'B', 11)
+                pdf.cell(0, 6, self._ensure_latin1("Entrega de resultados"), ln=1, align='C')
+                pdf.set_font("Arial", '', 9)
+                pdf.cell(
+                    0,
+                    5,
+                    self._ensure_latin1(f"Listado de pacientes - {base_date.strftime('%d/%m/%Y')}"),
+                    ln=1,
+                    align='C'
+                )
+                pdf.ln(1.5)
+                pdf.set_font("Arial", 'B', 7.6)
+                start_x = pdf.l_margin
+                start_y = pdf.get_y()
+                for idx, column in enumerate(columns):
+                    width = column["width"]
+                    pdf.rect(start_x, start_y, width, header_height, style='DF')
+                    text_y = start_y + padding_y
+                    for line in header_lines[idx]:
+                        pdf.set_xy(start_x + padding_x, text_y)
+                        pdf.cell(width - 2 * padding_x, line_height, line, border=0)
+                        text_y += line_height
+                    start_x += width
+                pdf.set_xy(pdf.l_margin, start_y + header_height)
+                pdf.set_font("Arial", '', 7.2)
+            row_start_x = pdf.l_margin
+            row_start_y = pdf.get_y()
+            for idx, column in enumerate(columns):
+                width = column["width"]
+                pdf.rect(row_start_x, row_start_y, width, row_height)
+                text_y = row_start_y + padding_y
+                for line in wrapped[idx]:
+                    pdf.set_xy(row_start_x + padding_x, text_y)
+                    pdf.cell(width - 2 * padding_x, line_height, line, border=0)
+                    text_y += line_height
+                row_start_x += width
+            pdf.set_xy(pdf.l_margin, row_start_y + row_height)
+        pdf.set_margins(prev_left, prev_top, prev_right)
+        pdf.set_auto_page_break(prev_auto, margin=prev_bottom)
 
     def _clear_history_table(self):
         if hasattr(self, 'history_table'):
@@ -4332,18 +4645,56 @@ class MainWindow(QMainWindow):
         self.stack.setCurrentWidget(self.page_emitir)
     def init_config_page(self):
         layout = QVBoxLayout(self.page_config)
+        profile_group = QGroupBox("Datos del usuario actual")
+        profile_layout = QFormLayout(profile_group)
+        self.profile_full_name_input = QLineEdit()
+        profile_layout.addRow("Nombre completo:", self.profile_full_name_input)
+        self.profile_profession_input = QLineEdit()
+        profile_layout.addRow("Profesión / Cargo:", self.profile_profession_input)
+        self.profile_license_input = QLineEdit()
+        profile_layout.addRow("Colegiatura / Registro:", self.profile_license_input)
+        btn_save_profile = QPushButton("Guardar perfil")
+        btn_save_profile.clicked.connect(self.save_user_profile)
+        profile_layout.addRow(btn_save_profile)
+        layout.addWidget(profile_group)
+        self._populate_profile_fields()
         info_label = QLabel("Crear nuevo usuario:")
         layout.addWidget(info_label)
         form_layout = QFormLayout()
         self.new_user_input = QLineEdit(); form_layout.addRow("Usuario:", self.new_user_input)
         self.new_pass_input = QLineEdit(); self.new_pass_input.setEchoMode(QLineEdit.Password)
         form_layout.addRow("Contraseña:", self.new_pass_input)
+        self.new_user_full_name = QLineEdit(); form_layout.addRow("Nombre completo:", self.new_user_full_name)
+        self.new_user_profession = QLineEdit(); form_layout.addRow("Profesión / Cargo:", self.new_user_profession)
+        self.new_user_license = QLineEdit(); form_layout.addRow("Colegiatura / Registro:", self.new_user_license)
         self.role_input = QComboBox(); self.role_input.addItems(["Administrador", "Superusuario"])
         form_layout.addRow("Rol:", self.role_input)
         layout.addLayout(form_layout)
         btn_create = QPushButton("Crear Usuario")
         layout.addWidget(btn_create)
         btn_create.clicked.connect(self.create_user)
+
+    def _populate_profile_fields(self):
+        if not hasattr(self, 'profile_full_name_input'):
+            return
+        self.profile_full_name_input.setText(self.user.get('full_name', ''))
+        self.profile_profession_input.setText(self.user.get('profession', ''))
+        self.profile_license_input.setText(self.user.get('license', ''))
+
+    def save_user_profile(self):
+        if not hasattr(self, 'profile_full_name_input'):
+            return
+        full_name = self.profile_full_name_input.text().strip()
+        profession = self.profile_profession_input.text().strip()
+        license_code = self.profile_license_input.text().strip()
+        success = self.labdb.update_user_profile(self.user.get('id'), full_name, profession, license_code)
+        if success:
+            self.user['full_name'] = full_name
+            self.user['profession'] = profession
+            self.user['license'] = license_code
+            QMessageBox.information(self, "Perfil actualizado", "Los datos del usuario fueron guardados.")
+        else:
+            QMessageBox.warning(self, "Sin cambios", "No se pudieron actualizar los datos del usuario.")
     def create_user(self):
         username = self.new_user_input.text().strip()
         password = self.new_pass_input.text().strip()
@@ -4352,9 +4703,13 @@ class MainWindow(QMainWindow):
         if username == "" or password == "":
             QMessageBox.warning(self, "Campos vacíos", "Ingrese nombre de usuario y contraseña.")
             return
-        success = self.labdb.create_user(username, password, role)
+        full_name = self.new_user_full_name.text().strip()
+        profession = self.new_user_profession.text().strip()
+        license_code = self.new_user_license.text().strip()
+        success = self.labdb.create_user(username, password, role, full_name, profession, license_code)
         if success:
             QMessageBox.information(self, "Usuario creado", f"Usuario '{username}' creado exitosamente.")
             self.new_user_input.clear(); self.new_pass_input.clear()
+            self.new_user_full_name.clear(); self.new_user_profession.clear(); self.new_user_license.clear()
         else:
             QMessageBox.warning(self, "Error", "No se pudo crear el usuario. ¿Nombre ya existe?")
