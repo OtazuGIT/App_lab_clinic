@@ -1992,6 +1992,23 @@ class MainWindow(QMainWindow):
                 helper_label.setStyleSheet("color: #0a84ff; font-size: 10px;")
                 container.layout().addWidget(helper_label)
                 target_info["has_auto_helper"] = True
+        auto_state = target_info.setdefault("_auto_calc_state", {
+            "manual_override": False,
+            "last_auto_value": "",
+            "listener_connected": False
+        })
+
+        def _handle_target_edit(text):
+            stripped = text.strip()
+            if stripped:
+                auto_state["manual_override"] = True
+            else:
+                auto_state["manual_override"] = False
+                auto_state["last_auto_value"] = ""
+
+        if not auto_state.get("listener_connected"):
+            target_widget.textEdited.connect(_handle_target_edit)
+            auto_state["listener_connected"] = True
         def on_change(text):
             value = self._to_float(text)
             if value is None:
@@ -1999,6 +2016,8 @@ class MainWindow(QMainWindow):
                     target_widget.blockSignals(True)
                     target_widget.clear()
                     target_widget.blockSignals(False)
+                    auto_state["last_auto_value"] = ""
+                    auto_state["manual_override"] = False
                 return
             result = None
             if operation == "divide":
@@ -2013,7 +2032,8 @@ class MainWindow(QMainWindow):
                 result = value - operand
             if result is None:
                 return
-            if only_if_empty and target_widget.text().strip():
+            current_text = target_widget.text().strip()
+            if only_if_empty and auto_state.get("manual_override") and current_text:
                 return
             if target_widget.hasFocus() and not calc.get("update_while_editing", False):
                 return
@@ -2024,6 +2044,8 @@ class MainWindow(QMainWindow):
             target_widget.blockSignals(True)
             target_widget.setText(formatted)
             target_widget.blockSignals(False)
+            auto_state["last_auto_value"] = formatted
+            auto_state["manual_override"] = False
         source_widget.textChanged.connect(on_change)
         if apply_on_load:
             on_change(source_widget.text())
