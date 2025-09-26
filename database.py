@@ -68,12 +68,23 @@ class LabDB:
         self._ensure_column_exists("orders", "sample_date", "TEXT")
         self._ensure_column_exists("orders", "emitted", "INTEGER", default_value="0")
         self._ensure_column_exists("orders", "emitted_at", "TEXT")
+        self._ensure_column_exists("orders", "deleted", "INTEGER", default_value="0")
+        self._ensure_column_exists("orders", "deleted_reason", "TEXT")
+        self._ensure_column_exists("orders", "deleted_by", "INTEGER")
+        self._ensure_column_exists("orders", "deleted_at", "TEXT")
         self.cur.execute("""
             CREATE TABLE IF NOT EXISTS order_tests (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 order_id INTEGER,
                 test_id INTEGER,
                 result TEXT,
+                sample_status TEXT DEFAULT 'recibida',
+                sample_issue TEXT,
+                observation TEXT,
+                deleted INTEGER DEFAULT 0,
+                deleted_reason TEXT,
+                deleted_by INTEGER,
+                deleted_at TEXT,
                 FOREIGN KEY(order_id) REFERENCES orders(id),
                 FOREIGN KEY(test_id) REFERENCES tests(id)
             )
@@ -163,6 +174,14 @@ class LabDB:
         self.cur.execute("SELECT id, name FROM tests")
         for tid, name in self.cur.fetchall():
             self.test_map[name] = tid
+        # Ajustar columnas agregadas posteriormente
+        self._ensure_column_exists("order_tests", "sample_status", "TEXT", default_value="recibida")
+        self._ensure_column_exists("order_tests", "sample_issue", "TEXT")
+        self._ensure_column_exists("order_tests", "observation", "TEXT")
+        self._ensure_column_exists("order_tests", "deleted", "INTEGER", default_value="0")
+        self._ensure_column_exists("order_tests", "deleted_reason", "TEXT")
+        self._ensure_column_exists("order_tests", "deleted_by", "INTEGER")
+        self._ensure_column_exists("order_tests", "deleted_at", "TEXT")
     def authenticate_user(self, username, password):
         self.cur.execute("SELECT id, username, role FROM users WHERE username=? AND password=?", (username, password))
         row = self.cur.fetchone()
@@ -234,6 +253,100 @@ class LabDB:
                                  (order_id, test_id, ""))
         self.conn.commit()
         return order_id
+    def find_recent_duplicate_order(self, patient_id, test_names, within_minutes=10):
+        if not patient_id or not test_names:
+            return None
+        normalized_target = sorted(name.strip().lower() for name in test_names if name)
+        if not normalized_target:
+            return None
+        import datetime
+        threshold = datetime.datetime.now() - datetime.timedelta(minutes=within_minutes)
+        self.cur.execute(
+            """
+            SELECT id FROM orders
+            WHERE patient_id=?
+              AND datetime(date) >= datetime(?)
+              AND (deleted IS NULL OR deleted=0)
+            ORDER BY datetime(date) DESC, id DESC
+            """,
+            (patient_id, threshold.strftime("%Y-%m-%d %H:%M:%S"))
+        )
+        candidate_ids = [row[0] for row in self.cur.fetchall()]
+        for oid in candidate_ids:
+            self.cur.execute(
+                """
+                SELECT t.name
+                FROM order_tests ot
+                JOIN tests t ON ot.test_id = t.id
+                WHERE ot.order_id=? AND (ot.deleted IS NULL OR ot.deleted=0)
+                ORDER BY t.name
+                """,
+                (oid,)
+            )
+            names = [row[0].strip().lower() for row in self.cur.fetchall() if row and row[0]]
+            if names == normalized_target:
+                return oid
+        return None
+
+    def mark_order_deleted(self, order_id, reason, user_id=None):
+        if not order_id:
+            return False
+        import datetime
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self.cur.execute(
+            """
+            UPDATE orders
+            SET deleted=1,
+                deleted_reason=?,
+                deleted_by=?,
+                deleted_at=?,
+                completed=0,
+                emitted=0
+            WHERE id=?
+            """,
+            (reason or "", user_id, timestamp, order_id)
+        )
+        order_updated = self.cur.rowcount
+        self.cur.execute(
+            """
+            UPDATE order_tests
+            SET deleted=1,
+                deleted_reason=?,
+                deleted_by=?,
+                deleted_at=?
+            WHERE order_id=?
+            """,
+            (reason or "", user_id, timestamp, order_id)
+        )
+        tests_updated = self.cur.rowcount
+        self.conn.commit()
+        return (order_updated > 0) or (tests_updated > 0)
+
+    def delete_order_test(self, order_test_id, reason, user_id=None):
+        if not order_test_id:
+            return False
+        import datetime
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self.cur.execute(
+            """
+            UPDATE order_tests
+            SET deleted=1,
+                deleted_reason=?,
+                deleted_by=?,
+                deleted_at=?
+            WHERE id=?
+            """,
+            (reason or "", user_id, timestamp, order_test_id)
+        )
+        if not self.cur.rowcount:
+            return False
+        self.conn.commit()
+        self.cur.execute("SELECT order_id FROM order_tests WHERE id=?", (order_test_id,))
+        row = self.cur.fetchone()
+        if row:
+            self._update_order_completion(row[0])
+        return True
+
     def get_pending_orders(self):
         self.cur.execute("""
             SELECT o.id, p.first_name, p.last_name, o.date, p.doc_type, p.doc_number
@@ -303,17 +416,40 @@ class LabDB:
         results = self.cur.fetchall()
         return {"patient": patient_info, "order": order_info, "results": results}
     def save_results(self, order_id, results_dict):
-        for name, result in results_dict.items():
-            if name in self.test_map:
-                tid = self.test_map[name]
-                if isinstance(result, dict):
-                    stored = json.dumps(result, ensure_ascii=False)
-                else:
-                    stored = result
-                self.cur.execute(
-                    "UPDATE order_tests SET result=? WHERE order_id=? AND test_id=?",
-                    (stored, order_id, tid)
-                )
+        for name, payload in results_dict.items():
+            if name not in self.test_map:
+                continue
+            tid = self.test_map[name]
+            result_value = payload
+            sample_status = None
+            sample_issue = None
+            observation = None
+            if isinstance(payload, dict) and "result" in payload:
+                result_value = payload.get("result")
+                sample_status = payload.get("sample_status")
+                sample_issue = payload.get("sample_issue")
+                observation = payload.get("observation")
+            if isinstance(result_value, dict):
+                stored = json.dumps(result_value, ensure_ascii=False)
+            else:
+                stored = result_value
+            if sample_status is None:
+                sample_status = "recibida"
+            if sample_issue is None:
+                sample_issue = ""
+            if observation is None:
+                observation = ""
+            self.cur.execute(
+                """
+                UPDATE order_tests
+                SET result=?,
+                    sample_status=?,
+                    sample_issue=?,
+                    observation=?
+                WHERE order_id=? AND test_id=?
+                """,
+                (stored, sample_status, sample_issue, observation, order_id, tid)
+            )
         return self._update_order_completion(order_id)
 
     def remove_test_from_order(self, order_id, test_name):
@@ -335,20 +471,33 @@ class LabDB:
         return False
 
     def _update_order_completion(self, order_id):
-        self.cur.execute("SELECT COUNT(*) FROM order_tests WHERE order_id=?", (order_id,))
-        total = self.cur.fetchone()[0]
-        if total == 0:
+        self.cur.execute(
+            """
+            SELECT result, sample_status
+            FROM order_tests
+            WHERE order_id=? AND (deleted IS NULL OR deleted=0)
+            """,
+            (order_id,)
+        )
+        rows = self.cur.fetchall()
+        if not rows:
             completed_flag = 1
         else:
-            self.cur.execute(
-                "SELECT COUNT(*) FROM order_tests WHERE order_id=? AND (result IS NULL OR result='')",
-                (order_id,)
-            )
-            pending = self.cur.fetchone()[0]
-            completed_flag = 1 if pending == 0 else 0
+            pending = 0
+            for result, sample_status in rows:
+                status = (sample_status or "recibida").strip().lower()
+                if status == "pendiente":
+                    pending += 1
+                    continue
+                if status == "rechazada":
+                    continue
+                if result in (None, ""):
+                    pending += 1
+            completed_flag = 0 if pending else 1
         self.cur.execute("UPDATE orders SET completed=? WHERE id=?", (completed_flag, order_id))
         self.conn.commit()
         return completed_flag
+
     def mark_order_emitted(self, order_id, emitted_at):
         self.cur.execute(
             """
@@ -363,23 +512,39 @@ class LabDB:
     def get_statistics(self):
         stats = {}
         self.cur.execute("SELECT COUNT(*) FROM patients"); stats["total_patients"] = self.cur.fetchone()[0]
-        self.cur.execute("SELECT COUNT(*) FROM orders"); stats["total_orders"] = self.cur.fetchone()[0]
-        self.cur.execute("SELECT COUNT(*) FROM order_tests"); stats["total_tests_conducted"] = self.cur.fetchone()[0]
+        self.cur.execute("SELECT COUNT(*) FROM orders WHERE (deleted IS NULL OR deleted=0)"); stats["total_orders"] = self.cur.fetchone()[0]
         self.cur.execute("""
-            SELECT t.category, COUNT(*) FROM order_tests ot JOIN tests t ON ot.test_id = t.id GROUP BY t.category
+            SELECT COUNT(*)
+            FROM order_tests ot
+            JOIN orders o ON ot.order_id = o.id
+            WHERE (ot.deleted IS NULL OR ot.deleted=0)
+              AND (o.deleted IS NULL OR o.deleted=0)
+        """)
+        stats["total_tests_conducted"] = self.cur.fetchone()[0]
+        self.cur.execute("""
+            SELECT t.category, COUNT(*)
+            FROM order_tests ot
+            JOIN tests t ON ot.test_id = t.id
+            JOIN orders o ON ot.order_id = o.id
+            WHERE (ot.deleted IS NULL OR ot.deleted=0)
+              AND (o.deleted IS NULL OR o.deleted=0)
+            GROUP BY t.category
         """)
         stats["by_category"] = self.cur.fetchall()
         return stats
     def get_results_in_range(self, start_datetime, end_datetime):
         self.cur.execute(
             """
-            SELECT o.id, o.date, o.sample_date, p.first_name, p.last_name, p.doc_type, p.doc_number,
-                   p.sex, p.birth_date, p.hcl, o.age_years, o.observations, t.name, t.category, ot.result
+            SELECT ot.id, o.id, o.date, o.sample_date, p.first_name, p.last_name, p.doc_type, p.doc_number,
+                   p.sex, p.birth_date, p.hcl, o.age_years, o.observations, t.name, t.category, ot.result,
+                   ot.sample_status, ot.sample_issue, ot.observation
             FROM order_tests ot
             JOIN orders o ON ot.order_id = o.id
             JOIN patients p ON o.patient_id = p.id
             JOIN tests t ON ot.test_id = t.id
             WHERE datetime(o.date) BETWEEN datetime(?) AND datetime(?)
+              AND (o.deleted IS NULL OR o.deleted=0)
+              AND (ot.deleted IS NULL OR ot.deleted=0)
             ORDER BY datetime(o.date) ASC, o.id ASC, ot.id ASC
             """,
             (start_datetime, end_datetime)
@@ -445,12 +610,13 @@ class LabDB:
         query = """
             SELECT o.id, o.date, o.sample_date, t.name, ot.result, t.category,
                    p.first_name, p.last_name, p.doc_type, p.doc_number,
-                   p.sex, p.birth_date, p.hcl, o.age_years, o.observations, o.emitted, o.emitted_at
+                   p.sex, p.birth_date, p.hcl, o.age_years, o.observations, o.emitted, o.emitted_at,
+                   ot.sample_status, ot.sample_issue, ot.observation, ot.id
             FROM orders o
             JOIN patients p ON o.patient_id = p.id
             JOIN order_tests ot ON ot.order_id = o.id
             JOIN tests t ON ot.test_id = t.id
-            WHERE p.doc_number = ?
+            WHERE p.doc_number = ? AND (o.deleted IS NULL OR o.deleted=0) AND (ot.deleted IS NULL OR ot.deleted=0)
         """
         if doc_type:
             query += " AND p.doc_type = ?"

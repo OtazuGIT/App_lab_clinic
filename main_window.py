@@ -1049,6 +1049,67 @@ class AddTestsDialog(QDialog):
         return [item.data(Qt.UserRole) for item in self.list_widget.selectedItems() if item.flags() & Qt.ItemIsEnabled]
 
 
+class ReasonDialog(QDialog):
+    def __init__(self, title, prompt, parent=None, placeholder="Describa el motivo" ):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setMinimumWidth(420)
+        layout = QVBoxLayout(self)
+        label = QLabel(prompt)
+        label.setWordWrap(True)
+        layout.addWidget(label)
+        self.text_edit = QTextEdit()
+        self.text_edit.setPlaceholderText(placeholder)
+        self.text_edit.setFixedHeight(120)
+        layout.addWidget(self.text_edit)
+        self.buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+        layout.addWidget(self.buttons)
+
+    def get_reason(self):
+        return self.text_edit.toPlainText().strip()
+
+
+class BatchEmitDialog(QDialog):
+    def __init__(self, orders, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Emitir resultados en lote")
+        self.setMinimumSize(540, 480)
+        layout = QVBoxLayout(self)
+        description = QLabel(
+            "Seleccione las órdenes que desea incluir en el PDF."
+        )
+        description.setWordWrap(True)
+        layout.addWidget(description)
+        self.list_widget = QListWidget()
+        self.list_widget.setSelectionMode(QListWidget.NoSelection)
+        for order in orders:
+            display = order.get("display", "")
+            item = QListWidgetItem(display)
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            item.setCheckState(Qt.Checked if order.get("preselect") else Qt.Unchecked)
+            item.setData(Qt.UserRole, order.get("id"))
+            if order.get("emitted"):
+                item.setForeground(Qt.gray)
+            self.list_widget.addItem(item)
+        layout.addWidget(self.list_widget)
+        self.buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+        layout.addWidget(self.buttons)
+
+    def get_selected_ids(self):
+        selected = []
+        for index in range(self.list_widget.count()):
+            item = self.list_widget.item(index)
+            if item.checkState() == Qt.Checked:
+                order_id = item.data(Qt.UserRole)
+                if order_id is not None:
+                    selected.append(int(order_id))
+        return selected
+
+
 class MainWindow(QMainWindow):
     def __init__(self, labdb, user):
         super().__init__()
@@ -1437,6 +1498,16 @@ class MainWindow(QMainWindow):
         if not selected_tests:
             QMessageBox.warning(self, "Sin pruebas", "Seleccione al menos una prueba.")
             return
+        duplicate_order = self.labdb.find_recent_duplicate_order(patient_id, selected_tests)
+        if duplicate_order:
+            reply = QMessageBox.question(
+                self,
+                "Posible duplicado",
+                f"Existe una orden reciente (#{duplicate_order}) con las mismas pruebas. ¿Desea continuar?",
+                QMessageBox.Yes | QMessageBox.No
+            )
+            if reply == QMessageBox.No:
+                return
         # Crear orden en BD con las pruebas seleccionadas
         order_id = self.labdb.add_order_with_tests(
             patient_id,
@@ -1512,9 +1583,12 @@ class MainWindow(QMainWindow):
         self.combo_orders = QComboBox()
         self.combo_orders.setMinimumWidth(350)
         btn_load = QPushButton("Cargar")
+        btn_delete_order = QPushButton("Eliminar orden")
+        btn_delete_order.setStyleSheet("color: #c0392b;")
         top_layout.addWidget(lbl)
         top_layout.addWidget(self.combo_orders)
         top_layout.addWidget(btn_load)
+        top_layout.addWidget(btn_delete_order)
         layout.addLayout(top_layout)
         # Área scrollable para campos de resultados
         self.results_area = QScrollArea()
@@ -1529,6 +1603,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(btn_save)
         btn_load.clicked.connect(self.load_order_fields)
         btn_save.clicked.connect(self.save_results)
+        btn_delete_order.clicked.connect(self.delete_order_from_results)
         self.order_search_input.textChanged.connect(self.filter_pending_orders)
         self.pending_sort_combo.currentIndexChanged.connect(
             lambda: self.filter_pending_orders(self.order_search_input.text(), prefer_order=self.selected_order_id)
@@ -1811,22 +1886,38 @@ class MainWindow(QMainWindow):
             self.load_order_fields()
         else:
             QMessageBox.warning(self, "Acción no realizada", "No se pudo quitar la prueba seleccionada.")
+
     def save_results(self):
         # Guardar los resultados ingresados para la orden seleccionada
         if not self.selected_order_id:
             return
-        results_dict = {}
+        results_payload = {}
         has_empty = False
+        pending_samples = 0
+        missing_notes = []
         for test_name, info in self.order_fields.items():
             template = info.get("template")
+            meta = info.get("meta", {})
+            status_combo = meta.get("status_widget")
+            issue_widget = meta.get("issue_widget")
+            observation_widget = meta.get("observation_widget")
+            status_value = "recibida"
+            if status_combo:
+                status_value = status_combo.currentText().strip().lower() or "recibida"
+            issue_value = issue_widget.text().strip() if issue_widget else ""
+            observation_value = observation_widget.toPlainText().strip() if observation_widget else ""
+            if status_value == "pendiente":
+                pending_samples += 1
+            if status_value in {"pendiente", "rechazada"} and not issue_value:
+                missing_notes.append(test_name)
             if template:
                 values = {}
                 for key, field_info in info["fields"].items():
                     value = self._get_widget_value(field_info)
                     values[key] = value
-                    if value == "" and not field_info["definition"].get("optional", False):
+                    if status_value == "recibida" and value == "" and not field_info["definition"].get("optional", False):
                         has_empty = True
-                results_dict[test_name] = {
+                result_value = {
                     "type": "structured",
                     "template": info.get("template_name", test_name),
                     "values": values
@@ -1834,9 +1925,23 @@ class MainWindow(QMainWindow):
             else:
                 field_info = info["fields"].get("__value__")
                 value = self._get_widget_value(field_info)
-                results_dict[test_name] = value
-                if value == "":
+                if status_value == "recibida" and value == "":
                     has_empty = True
+                result_value = value
+            results_payload[test_name] = {
+                "result": result_value,
+                "sample_status": status_value,
+                "sample_issue": issue_value,
+                "observation": observation_value
+            }
+        if missing_notes:
+            detalle = ", ".join(missing_notes)
+            QMessageBox.warning(
+                self,
+                "Motivo requerido",
+                f"Indique el motivo o detalle para las muestras marcadas como pendientes/rechazadas: {detalle}"
+            )
+            return
         if has_empty:
             reply = QMessageBox.question(
                 self,
@@ -1846,7 +1951,7 @@ class MainWindow(QMainWindow):
             )
             if reply == QMessageBox.No:
                 return
-        completed = self.labdb.save_results(self.selected_order_id, results_dict)
+        completed = self.labdb.save_results(self.selected_order_id, results_payload)
         if completed:
             QMessageBox.information(self, "Completado", "Resultados guardados. Orden marcada como completada.")
             self.selected_order_id = None
@@ -1858,8 +1963,12 @@ class MainWindow(QMainWindow):
             self.results_layout.addWidget(msg)
             self.results_layout.addStretch()
         else:
-            QMessageBox.information(self, "Guardado", "Resultados guardados (orden aún incompleta).")
+            message = "Resultados guardados (orden aún incompleta)."
+            if pending_samples:
+                message += "\nHay muestras pendientes o rechazadas registradas."
+            QMessageBox.information(self, "Guardado", message)
             self.load_order_fields()
+
     def _clear_results_layout(self):
         if not hasattr(self, 'results_layout'):
             return
@@ -2506,6 +2615,15 @@ class MainWindow(QMainWindow):
         if emitted_flag == 0:
             return "No"
         return "-"
+
+    def _format_sample_status_text(self, status_value, note):
+        value = (status_value or "recibida").strip().lower()
+        if value == "recibida":
+            return ""
+        label = "Pendiente" if value == "pendiente" else "Rechazada"
+        if note:
+            return f"{label} - {note}"
+        return label
     def _calculate_age_years(self, patient_info, order_info):
         age_value = order_info.get('age_years') if isinstance(order_info, dict) else None
         if age_value is not None:
@@ -2726,10 +2844,13 @@ class MainWindow(QMainWindow):
         self.combo_completed = QComboBox()
         btn_view = QPushButton("Ver")
         btn_add_tests = QPushButton("Agregar pruebas")
+        btn_delete_completed = QPushButton("Eliminar orden")
+        btn_delete_completed.setStyleSheet("color: #c0392b;")
         top_layout.addWidget(lbl)
         top_layout.addWidget(self.combo_completed, 1)
         top_layout.addWidget(btn_view)
         top_layout.addWidget(btn_add_tests)
+        top_layout.addWidget(btn_delete_completed)
         layout.addLayout(top_layout)
         sort_layout = QHBoxLayout()
         self.include_emitted_checkbox = QCheckBox("Mostrar emitidos")
@@ -2749,12 +2870,15 @@ class MainWindow(QMainWindow):
         self.output_text = QTextEdit(); self.output_text.setReadOnly(True)
         layout.addWidget(self.output_text)
         btn_pdf = QPushButton("Emitir en PDF"); btn_excel = QPushButton("Exportar a Excel")
-        btns_layout = QHBoxLayout(); btns_layout.addWidget(btn_pdf); btns_layout.addWidget(btn_excel)
+        btn_pdf_batch = QPushButton("Emitir PDF en lote")
+        btns_layout = QHBoxLayout(); btns_layout.addWidget(btn_pdf); btns_layout.addWidget(btn_pdf_batch); btns_layout.addWidget(btn_excel)
         layout.addLayout(btns_layout)
         btn_view.clicked.connect(self.display_selected_result)
         btn_pdf.clicked.connect(self.export_pdf)
         btn_excel.clicked.connect(self.export_excel)
+        btn_pdf_batch.clicked.connect(self.export_pdf_batch)
         btn_add_tests.clicked.connect(self.add_tests_to_selected_order)
+        btn_delete_completed.clicked.connect(self.delete_order_from_emission)
         self.include_emitted_checkbox.toggled.connect(self.populate_completed_orders)
         self.completed_sort_combo.currentIndexChanged.connect(lambda: self._refresh_completed_combo())
     def populate_completed_orders(self):
@@ -2778,6 +2902,68 @@ class MainWindow(QMainWindow):
             }
             self.completed_orders_cache.append(order)
         self._refresh_completed_combo()
+
+
+def delete_order_from_results(self):
+    if not hasattr(self, 'combo_orders'):
+        return
+    data = self.combo_orders.currentData()
+    if data is None:
+        QMessageBox.information(self, "Sin selección", "Seleccione una orden pendiente para eliminar.")
+        return
+    self._confirm_delete_order(int(data))
+
+def delete_order_from_emission(self):
+    if not hasattr(self, 'combo_completed'):
+        return
+    data = self.combo_completed.currentData()
+    if data is None:
+        QMessageBox.information(self, "Sin selección", "Seleccione una orden completada para eliminar.")
+        return
+    self._confirm_delete_order(int(data))
+
+def _confirm_delete_order(self, order_id):
+    if not order_id:
+        return
+    info = self.labdb.get_order_details(order_id)
+    if not info:
+        QMessageBox.warning(self, "Orden no disponible", "La orden seleccionada ya no está disponible.")
+        self.populate_pending_orders()
+        self.populate_completed_orders()
+        return
+    pat = info.get("patient", {})
+    ord_inf = info.get("order", {})
+    patient_name = pat.get("name") or "-"
+    confirm = QMessageBox.question(
+        self,
+        "Eliminar orden",
+        f"¿Desea eliminar la orden #{order_id} asociada a {patient_name}?",
+        QMessageBox.Yes | QMessageBox.No
+    )
+    if confirm == QMessageBox.No:
+        return
+    dialog = ReasonDialog(
+        "Motivo de eliminación",
+        "Indique el motivo por el que se elimina la orden.",
+        self,
+        placeholder="Motivo (ej. duplicado, prueba, error de digitación)"
+    )
+    dialog.text_edit.setPlainText("Duplicidad de registro")
+    if dialog.exec_() != QDialog.Accepted:
+        return
+    reason = dialog.get_reason() or "Sin motivo"
+    deleted = self.labdb.mark_order_deleted(order_id, reason, self.user.get('id'))
+    if deleted:
+        QMessageBox.information(self, "Orden eliminada", f"La orden #{order_id} fue eliminada correctamente.")
+        if getattr(self, 'selected_order_id', None) == order_id:
+            self.selected_order_id = None
+        self.populate_pending_orders()
+        self.populate_completed_orders()
+        self.load_activity_summary()
+        self.output_text.clear()
+        self._clear_results_layout()
+    else:
+        QMessageBox.warning(self, "Sin cambios", "No se pudo eliminar la orden seleccionada.")
 
     def add_tests_to_selected_order(self):
         data = self.combo_completed.currentData() if hasattr(self, 'combo_completed') else None
@@ -2817,6 +3003,7 @@ class MainWindow(QMainWindow):
             if hasattr(self, 'combo_orders'):
                 self._select_order_in_combo(self.combo_orders, order_id)
             self.load_order_fields()
+
     def display_selected_result(self):
         # Mostrar los resultados de la orden seleccionada en el cuadro de texto
         data = self.combo_completed.currentData()
@@ -2826,7 +3013,9 @@ class MainWindow(QMainWindow):
         info = self.labdb.get_order_details(order_id)
         if not info:
             return
-        pat = info["patient"]; ord_inf = info["order"]; results = info["results"]
+        pat = info["patient"]
+        ord_inf = info["order"]
+        results = info["results"]
         context = {"patient": pat, "order": ord_inf}
         doc_text = " ".join([part for part in (pat.get('doc_type'), pat.get('doc_number')) if part]) or "-"
         lines = [f"PACIENTE: {pat.get('name') or '-'}", f"DOCUMENTO: {doc_text}"]
@@ -2835,9 +3024,8 @@ class MainWindow(QMainWindow):
         lines.append(f"SEXO: {pat.get('sex') or '-'}")
         lines.append(f"HISTORIA CLÍNICA: {pat.get('hcl') or '-'}")
         lines.append(f"PROCEDENCIA: {pat.get('origin') or '-'}")
-        lines.append(f"FECHA DE MUESTRA: {ord_inf.get('date') or '-'}")
-        lines.append(f"SOLICITANTE: {ord_inf.get('requested_by') or '-'}")
-        lines.append(f"DIAGNÓSTICO PRESUNTIVO: {ord_inf.get('diagnosis') or '-'}")
+        requester = ord_inf.get('requested_by') or '-'
+        lines.append(f"SOLICITANTE: {requester}")
         emission_raw = ord_inf.get('emitted_at')
         if emission_raw:
             try:
@@ -2847,26 +3035,34 @@ class MainWindow(QMainWindow):
                 emission_display = emission_raw
         else:
             emission_display = "Pendiente de emisión"
-        lines.append(f"FECHA DE EMISIÓN: {emission_display}")
+        lines.append(f"FECHA DEL INFORME: {emission_display}")
+        lines.append(f"FECHA DE REGISTRO: {ord_inf.get('date') or '-'}")
         lines.append("RESULTADOS:")
-        for test_name, result, _ in results:
-            formatted_lines = self._format_result_lines(test_name, result, context=context)
+        for test_name, raw_result, _, sample_status, sample_issue, observation, _ in results:
+            formatted_lines = self._format_result_lines(test_name, raw_result, context=context)
             if formatted_lines:
                 lines.extend(formatted_lines)
+            status_text = self._format_sample_status_text(sample_status, sample_issue)
+            if status_text:
+                lines.append(f"    Estado de muestra: {status_text}")
+            if observation:
+                lines.append(f"    Observación: {observation}")
         if ord_inf["observations"]:
-            lines.append(f"Observaciones: {ord_inf['observations']}")
+            lines.append(f"Observaciones generales: {ord_inf['observations']}")
         self.output_text.setPlainText("\n".join(lines))
 
+
     def export_pdf(self):
-        # Exportar el resultado seleccionado a un archivo PDF
         data = self.combo_completed.currentData()
         if data is None:
             return
         order_id = int(data)
         info = self.labdb.get_order_details(order_id)
         if not info:
+            QMessageBox.warning(self, "Orden no disponible", "La orden seleccionada ya no está disponible.")
+            self.populate_completed_orders()
             return
-        pat = info["patient"]; ord_inf = info["order"]; results = info["results"]
+        ord_inf = info["order"]
         suggested_name = f"Orden_{order_id}.pdf"
         options = QFileDialog.Options()
         file_path, _ = QFileDialog.getSaveFileName(self, "Guardar PDF", suggested_name, "Archivos PDF (*.pdf)", options=options)
@@ -2874,19 +3070,49 @@ class MainWindow(QMainWindow):
             return
         if not file_path.lower().endswith(".pdf"):
             file_path += ".pdf"
-        existing_emission = ord_inf.get('emitted_at')
-        mark_as_emitted = not (ord_inf.get('emitted') and existing_emission)
-        if mark_as_emitted:
-            emission_time = datetime.datetime.now()
-            emission_display = emission_time.strftime("%d/%m/%Y %H:%M")
-            emission_timestamp = emission_time.strftime("%Y-%m-%d %H:%M:%S")
-        else:
-            emission_timestamp = existing_emission
+        existing_emission = ord_inf.get('emitted') and ord_inf.get('emitted_at')
+        mark_as_emitted = False
+        if existing_emission:
+            reply = QMessageBox.question(
+                self,
+                "Emitido previamente",
+                "El informe ya fue emitido anteriormente. ¿Desea generar una copia?",
+                QMessageBox.Yes | QMessageBox.No
+            )
+            if reply == QMessageBox.No:
+                return
+            emission_timestamp = ord_inf.get('emitted_at')
             try:
-                parsed = datetime.datetime.strptime(existing_emission, "%Y-%m-%d %H:%M:%S")
-                emission_display = parsed.strftime("%d/%m/%Y %H:%M")
+                emission_dt = datetime.datetime.strptime(emission_timestamp, "%Y-%m-%d %H:%M:%S")
+                emission_display = emission_dt.strftime("%d/%m/%Y %H:%M")
             except Exception:
-                emission_display = existing_emission or "-"
+                emission_display = emission_timestamp or "-"
+        else:
+            mark_as_emitted = True
+            emission_time = datetime.datetime.now()
+            emission_timestamp = emission_time.strftime("%Y-%m-%d %H:%M:%S")
+            emission_display = emission_time.strftime("%d/%m/%Y %H:%M")
+        pdf = FPDF('P', 'mm', 'A4')
+        pdf.set_margins(12, 12, 12)
+        pdf.set_auto_page_break(True, margin=14)
+        pdf.add_page()
+        self._render_order_pdf(pdf, info, emission_display)
+        try:
+            pdf.output(file_path)
+        except Exception as exc:
+            QMessageBox.warning(self, "Error", f"No se pudo guardar el PDF:\n{exc}")
+            return
+        if mark_as_emitted:
+            self.labdb.mark_order_emitted(order_id, emission_timestamp)
+        QMessageBox.information(self, "Informe emitido", f"Reporte guardado en:\n{file_path}")
+        self.populate_completed_orders()
+        self.output_text.clear()
+
+    def _render_order_pdf(self, pdf, info, emission_display):
+        pat = info["patient"]
+        ord_inf = info["order"]
+        results = info["results"]
+        context = {"patient": pat, "order": ord_inf}
         doc_text = " ".join([part for part in (pat.get('doc_type'), pat.get('doc_number')) if part]) or "-"
         patient_name = (pat.get('name') or '-').upper()
         age_text = self._format_age_text(pat, ord_inf)
@@ -2895,19 +3121,14 @@ class MainWindow(QMainWindow):
         hcl_text = (pat.get('hcl') or '-').upper()
         origin_text = (pat.get('origin') or '-').upper()
         requester_text = (ord_inf.get('requested_by') or '-').upper()
-        diagnosis_text = (ord_inf.get('diagnosis') or '-').upper()
-        context = {"patient": pat, "order": ord_inf}
-        pdf = FPDF('P', 'mm', 'A4')
-        pdf.set_margins(12, 12, 12)
-        pdf.set_auto_page_break(True, margin=14)
-        pdf.add_page()
+        emission_state = "Emitido" if emission_display != "Pendiente de emisión" else "Por emitir"
         header_image_path = os.path.join("img", "img.png")
         info_pairs = [
             (("Paciente", patient_name), ("Edad", age_text)),
             (("Documento", doc_text.upper() if doc_text else "-"), ("Sexo", sex_text)),
-            (("Historia clínica", hcl_text), ("Fecha emisión", emission_display)),
-            (("Procedencia", origin_text), ("Fecha muestra", order_date_text)),
-            (("Solicitante", requester_text), ("Diagnóstico presuntivo", diagnosis_text)),
+            (("Historia clínica", hcl_text), ("Estado de emisión", emission_state)),
+            (("Procedencia", origin_text), ("Fecha del informe", emission_display)),
+            (("Solicitante", requester_text), ("Fecha de registro", order_date_text)),
         ]
 
         def draw_patient_info():
@@ -3023,7 +3244,7 @@ class MainWindow(QMainWindow):
                 current = words[0]
                 for word in words[1:]:
                     candidate = f"{current} {word}"
-                    if pdf.get_string_width(candidate) <= max_width:
+                    if pdf.get_string_width(candidate) <= max(max_width, 1):
                         current = candidate
                     else:
                         lines.append(current)
@@ -3063,7 +3284,7 @@ class MainWindow(QMainWindow):
             row_height = max_lines * line_height + 2 * padding_y
             if ensure_space(row_height):
                 on_new_page()
-                render_table_header(widths)
+                render_table_header(widths, on_new_page)
             x_start = pdf.l_margin
             y_start = pdf.get_y()
             pdf.set_draw_color(210, 215, 226)
@@ -3085,7 +3306,7 @@ class MainWindow(QMainWindow):
             section_height = 4.2
             if ensure_space(section_height + 1):
                 on_new_page()
-                render_table_header(widths)
+                render_table_header(widths, on_new_page)
             pdf.set_font("Arial", 'B', 6.8)
             pdf.set_fill_color(242, 246, 253)
             pdf.set_text_color(47, 84, 150)
@@ -3106,7 +3327,7 @@ class MainWindow(QMainWindow):
             pdf.set_text_color(0, 0, 0)
             pdf.ln(1.2)
 
-        for test_name, raw_result, _ in results:
+        for test_name, raw_result, _, sample_status, sample_issue, observation, _ in results:
             structure = self._extract_result_structure(test_name, raw_result, context=context)
             if structure.get("type") == "structured":
                 items = structure.get("items", [])
@@ -3141,27 +3362,117 @@ class MainWindow(QMainWindow):
                 ensure_space(6)
                 pdf.set_font("Arial", '', 7)
                 pdf.multi_cell(0, 4, self._ensure_latin1(text_value))
+            status_text = self._format_sample_status_text(sample_status, sample_issue)
+            if status_text:
+                ensure_space(5)
+                pdf.set_font("Arial", 'I', 6.6)
+                pdf.set_text_color(166, 38, 38)
+                pdf.multi_cell(0, 3.8, self._ensure_latin1(f"Estado de muestra: {status_text}"))
+                pdf.set_text_color(0, 0, 0)
+            if observation:
+                ensure_space(5)
+                pdf.set_font("Arial", 'I', 6.6)
+                pdf.multi_cell(0, 3.8, self._ensure_latin1(f"Observación: {observation}"))
             pdf.ln(2)
 
-        if ord_inf.get('observations'):
+        if ord_inf.get('observations') and str(ord_inf['observations']).strip().upper() not in {"", "N/A"}:
             ensure_space(8)
             pdf.set_font("Arial", 'B', 7.4)
-            pdf.cell(0, 4.2, "Observaciones", ln=1)
+            pdf.cell(0, 4.2, "Observaciones generales", ln=1)
             pdf.set_font("Arial", '', 6.9)
             pdf.multi_cell(0, 3.6, self._ensure_latin1(ord_inf['observations']))
             pdf.ln(1.5)
 
+    def export_pdf_batch(self):
+        orders = getattr(self, 'completed_orders_cache', [])
+        if not orders:
+            QMessageBox.information(self, "Sin órdenes", "No hay órdenes completadas para emitir.")
+            return
+        options = []
+        for order in orders:
+            option = {
+                "id": order["id"],
+                "display": self._format_order_display(order),
+                "preselect": not order.get("emitted"),
+                "emitted": order.get("emitted")
+            }
+            options.append(option)
+        dialog = BatchEmitDialog(options, self)
+        if dialog.exec_() != QDialog.Accepted:
+            return
+        selected_ids = dialog.get_selected_ids()
+        if not selected_ids:
+            QMessageBox.information(self, "Sin selección", "Seleccione al menos una orden para emitir.")
+            return
+        orders_to_emit = []
+        already_emitted = []
+        for oid in selected_ids:
+            info = self.labdb.get_order_details(oid)
+            if not info:
+                continue
+            ord_inf = info["order"]
+            existing_emission = ord_inf.get('emitted') and ord_inf.get('emitted_at')
+            if existing_emission:
+                already_emitted.append(oid)
+                emission_timestamp = ord_inf.get('emitted_at')
+                try:
+                    emission_dt = datetime.datetime.strptime(emission_timestamp, "%Y-%m-%d %H:%M:%S")
+                    emission_display = emission_dt.strftime("%d/%m/%Y %H:%M")
+                except Exception:
+                    emission_display = emission_timestamp or "-"
+                mark = False
+            else:
+                emission_time = datetime.datetime.now()
+                emission_timestamp = emission_time.strftime("%Y-%m-%d %H:%M:%S")
+                emission_display = emission_time.strftime("%d/%m/%Y %H:%M")
+                mark = True
+            orders_to_emit.append({
+                "id": oid,
+                "info": info,
+                "emission_display": emission_display,
+                "emission_timestamp": emission_timestamp,
+                "mark": mark
+            })
+        if not orders_to_emit:
+            QMessageBox.information(self, "Sin datos", "Las órdenes seleccionadas no están disponibles para emitir.")
+            return
+        if already_emitted:
+            reply = QMessageBox.question(
+                self,
+                "Emitir copias",
+                "Algunas órdenes ya fueron emitidas. ¿Desea generar copias junto con los nuevos informes?",
+                QMessageBox.Yes | QMessageBox.No
+            )
+            if reply == QMessageBox.No:
+                orders_to_emit = [entry for entry in orders_to_emit if entry.get("mark")]
+                if not orders_to_emit:
+                    return
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Guardar lote",
+            "Resultados_lote.pdf",
+            "Archivos PDF (*.pdf)"
+        )
+        if not file_path:
+            return
+        if not file_path.lower().endswith(".pdf"):
+            file_path += ".pdf"
+        pdf = FPDF('P', 'mm', 'A4')
+        pdf.set_margins(12, 12, 12)
+        pdf.set_auto_page_break(True, margin=14)
+        for idx, entry in enumerate(orders_to_emit):
+            pdf.add_page()
+            self._render_order_pdf(pdf, entry["info"], entry["emission_display"])
         try:
             pdf.output(file_path)
-        except Exception as e:
-            QMessageBox.warning(self, "Error", f"No se pudo guardar el PDF:\n{e}")
+        except Exception as exc:
+            QMessageBox.warning(self, "Error", f"No se pudo guardar el PDF:\n{exc}")
             return
-        if mark_as_emitted:
-            self.labdb.mark_order_emitted(order_id, emission_timestamp)
-        QMessageBox.information(self, "Informe emitido", f"Reporte guardado en:\n{file_path}")
+        for entry in orders_to_emit:
+            if entry.get("mark"):
+                self.labdb.mark_order_emitted(entry["id"], entry["emission_timestamp"])
+        QMessageBox.information(self, "Informe emitido", f"Resultados guardados en:\n{file_path}")
         self.populate_completed_orders()
-        self.output_text.clear()
-
 
     def export_excel(self):
         # Exportar todos los resultados a un archivo CSV (Excel puede abrirlo)
@@ -3173,17 +3484,18 @@ class MainWindow(QMainWindow):
             file_path += ".csv"
         self.labdb.cur.execute("""
             SELECT p.first_name, p.last_name, p.doc_type, p.doc_number, p.sex, p.birth_date,
-                   t.name, ot.result, o.date, o.requested_by, o.diagnosis, o.age_years
+                   t.name, ot.result, o.date, o.requested_by, ot.sample_status, ot.sample_issue, ot.observation, o.age_years
             FROM order_tests ot
             JOIN orders o ON ot.order_id = o.id
             JOIN patients p ON o.patient_id = p.id
             JOIN tests t ON ot.test_id = t.id
+            WHERE (o.deleted IS NULL OR o.deleted=0) AND (ot.deleted IS NULL OR ot.deleted=0)
         """)
         rows = self.labdb.cur.fetchall()
         try:
             with open(file_path, 'w', encoding='utf-8') as f:
-                f.write("Nombre,Apellidos,Documento,Prueba,Resultado,Fecha,Solicitante,Diagnostico presuntivo,Edad (años)\n")
-                for first, last, doc_type, doc_num, sex, birth_date, test_name, result, date, requester, diagnosis, age_years in rows:
+                f.write("Nombre,Apellidos,Documento,Prueba,Resultado,Fecha,Solicitante,Estado de muestra,Observación muestra,Edad (años)\n")
+                for first, last, doc_type, doc_num, sex, birth_date, test_name, result, date, requester, sample_status, sample_issue, observation, age_years in rows:
                     name = (first or "").upper(); surn = (last or "").upper(); doc = f"{doc_type} {doc_num}".strip()
                     context = {
                         "patient": {"sex": sex, "birth_date": birth_date},
@@ -3193,9 +3505,10 @@ class MainWindow(QMainWindow):
                     res = res.replace('"', "'")
                     dt = date
                     req = (requester or "").upper()
-                    diag = (diagnosis or "").upper()
+                    status_text = self._format_sample_status_text(sample_status, sample_issue) or "-"
+                    obs_text = (observation or "").strip().replace('"', "'")
                     age_txt = str(age_years) if age_years is not None else ""
-                    line = f"{name},{surn},{doc},{test_name},\"{res}\",{dt},{req},{diag},{age_txt}\n"
+                    line = f"{name},{surn},{doc},{test_name},\"{res}\",{dt},{req},{status_text},\"{obs_text}\",{age_txt}\n"
                     f.write(line)
             QMessageBox.information(self, "Exportado", f"Datos exportados a:\n{file_path}")
         except Exception as e:
@@ -3233,15 +3546,18 @@ class MainWindow(QMainWindow):
         self.view_activity_btn = QPushButton("Mostrar registro")
         self.export_activity_pdf_btn = QPushButton("Exportar PDF")
         self.export_activity_csv_btn = QPushButton("Exportar CSV")
+        self.delete_activity_btn = QPushButton("Eliminar selección")
+        self.delete_activity_btn.setStyleSheet("color: #c0392b;")
         controls_layout.addWidget(self.view_activity_btn)
         controls_layout.addWidget(self.export_activity_pdf_btn)
         controls_layout.addWidget(self.export_activity_csv_btn)
+        controls_layout.addWidget(self.delete_activity_btn)
         controls_layout.addStretch()
         layout.addLayout(controls_layout)
         self.activity_caption = QLabel()
         self.activity_caption.setStyleSheet("font-weight: bold;")
         layout.addWidget(self.activity_caption)
-        self.activity_table = QTableWidget(0, 7)
+        self.activity_table = QTableWidget(0, 8)
         self.activity_table.setHorizontalHeaderLabels([
             "Fecha",
             "Orden",
@@ -3249,10 +3565,12 @@ class MainWindow(QMainWindow):
             "Documento",
             "Edad",
             "Prueba",
+            "Estado",
             "Resultado"
         ])
         self.activity_table.setAlternatingRowColors(True)
         self.activity_table.horizontalHeader().setStretchLastSection(True)
+        self.activity_table.setSelectionMode(QTableWidget.MultiSelection)
         layout.addWidget(self.activity_table)
         history_group = QGroupBox("Historial por DNI")
         history_layout = QVBoxLayout(history_group)
@@ -3295,6 +3613,7 @@ class MainWindow(QMainWindow):
         self.view_activity_btn.clicked.connect(self.load_activity_summary)
         self.export_activity_pdf_btn.clicked.connect(lambda: self.export_activity_record("pdf"))
         self.export_activity_csv_btn.clicked.connect(lambda: self.export_activity_record("csv"))
+        self.delete_activity_btn.clicked.connect(self.delete_selected_activity_entries)
         self._update_range_controls()
         self.history_doc_input.returnPressed.connect(self.search_patient_history)
         self.history_search_btn.clicked.connect(self.search_patient_history)
@@ -3371,101 +3690,157 @@ class MainWindow(QMainWindow):
         end_dt = datetime.datetime.combine(end_date, datetime.time.max)
         return start_dt, end_dt, description
 
-    def load_activity_summary(self):
+
+def load_activity_summary(self):
+    if not hasattr(self, 'activity_table'):
+        return
+    start_dt, end_dt, description = self._get_selected_range()
+    rows = self.labdb.get_results_in_range(
+        start_dt.strftime("%Y-%m-%d %H:%M:%S"),
+        end_dt.strftime("%Y-%m-%d %H:%M:%S")
+    )
+    activity_data = []
+    for (
+        test_entry_id,
+        order_id,
+        date_str,
+        sample_date_str,
+        first,
+        last,
+        doc_type,
+        doc_number,
+        sex,
+        birth_date,
+        hcl,
+        age_years,
+        order_obs,
+        test_name,
+        category,
+        result,
+        sample_status,
+        sample_issue,
+        observation
+    ) in rows:
+        display_date = "-"
+        if sample_date_str:
+            try:
+                sample_dt = datetime.datetime.strptime(sample_date_str, "%Y-%m-%d")
+                display_date = sample_dt.strftime("%d/%m/%Y")
+            except Exception:
+                display_date = sample_date_str
+        if display_date == "-":
+            try:
+                order_dt = datetime.datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
+                display_date = order_dt.strftime("%d/%m/%Y %H:%M")
+            except Exception:
+                display_date = date_str or "-"
+        patient_name = " ".join(part for part in [(first or "").upper(), (last or "").upper()] if part).strip() or "-"
+        doc_text = " ".join(part for part in (doc_type, doc_number) if part).strip() or "-"
+        age_display = str(age_years) if age_years not in (None, "") else "-"
+        context = {
+            "patient": {"sex": sex, "birth_date": birth_date},
+            "order": {"age_years": age_years}
+        }
+        summary_items = self._build_registry_summary(test_name, result, context=context)
+        if not summary_items:
+            continue
+        result_text = "; ".join(summary_items)
+        activity_data.append({
+            "entry_id": test_entry_id,
+            "order_id": order_id,
+            "date": display_date,
+            "order_date_raw": date_str,
+            "sample_date_raw": sample_date_str,
+            "patient": patient_name,
+            "document": doc_text,
+            "doc_type": doc_type,
+            "doc_number": doc_number,
+            "birth_date": birth_date,
+            "hcl": hcl,
+            "age": age_display,
+            "test": test_name,
+            "result": result_text,
+            "summary_items": summary_items,
+            "category": category,
+            "order_observations": order_obs,
+            "emitted": None,
+            "emitted_at": None,
+            "first_name": first,
+            "last_name": last,
+            "sample_status": sample_status,
+            "sample_issue": sample_issue,
+            "observation": observation
+        })
+    self._activity_cache = {
+        "data": activity_data,
+        "description": description,
+        "start": start_dt,
+        "end": end_dt
+    }
+    self.activity_table.setRowCount(len(activity_data))
+    for row_idx, item in enumerate(activity_data):
+        self.activity_table.setItem(row_idx, 0, QTableWidgetItem(item["date"]))
+        order_item = QTableWidgetItem(str(item["order_id"]))
+        order_item.setTextAlignment(Qt.AlignCenter)
+        self.activity_table.setItem(row_idx, 1, order_item)
+        self.activity_table.setItem(row_idx, 2, QTableWidgetItem(item["patient"]))
+        self.activity_table.setItem(row_idx, 3, QTableWidgetItem(item["document"]))
+        age_item = QTableWidgetItem(item["age"])
+        age_item.setTextAlignment(Qt.AlignCenter)
+        self.activity_table.setItem(row_idx, 4, age_item)
+        self.activity_table.setItem(row_idx, 5, QTableWidgetItem(item["test"]))
+        status_text = self._format_sample_status_text(item.get("sample_status"), item.get("sample_issue"))
+        self.activity_table.setItem(row_idx, 6, QTableWidgetItem(status_text or "-"))
+        self.activity_table.setItem(row_idx, 7, QTableWidgetItem(item["result"]))
+    if hasattr(self, 'activity_caption'):
+        self.activity_caption.setText(
+            f"Registro de pruebas: {description} - {len(activity_data)} resultado(s)"
+        )
+
+
+    def delete_selected_activity_entries(self):
         if not hasattr(self, 'activity_table'):
             return
-        start_dt, end_dt, description = self._get_selected_range()
-        rows = self.labdb.get_results_in_range(
-            start_dt.strftime("%Y-%m-%d %H:%M:%S"),
-            end_dt.strftime("%Y-%m-%d %H:%M:%S")
+        selected = self.activity_table.selectionModel().selectedRows() if self.activity_table.selectionModel() else []
+        if not selected:
+            QMessageBox.information(self, "Sin selección", "Seleccione al menos un resultado para eliminar.")
+            return
+        if not getattr(self, '_activity_cache', None):
+            self.load_activity_summary()
+        cache = getattr(self, '_activity_cache', {"data": []})
+        entries = cache.get("data", [])
+        selected_ids = []
+        for model_index in selected:
+            row = model_index.row()
+            if 0 <= row < len(entries):
+                entry = entries[row]
+                entry_id = entry.get("entry_id")
+                if entry_id:
+                    selected_ids.append(entry_id)
+        if not selected_ids:
+            QMessageBox.warning(self, "Sin datos", "No se pudo identificar los registros seleccionados.")
+            return
+        dialog = ReasonDialog(
+            "Eliminar resultados",
+            "Indique el motivo de eliminación de los resultados seleccionados.",
+            self,
+            placeholder="Motivo (ej. duplicidad, prueba, corrección)"
         )
-        activity_data = []
-        for (
-            order_id,
-            date_str,
-            sample_date_str,
-            first,
-            last,
-            doc_type,
-            doc_number,
-            sex,
-            birth_date,
-            hcl,
-            age_years,
-            order_obs,
-            test_name,
-            category,
-            result
-        ) in rows:
-            display_date = "-"
-            if sample_date_str:
-                try:
-                    sample_dt = datetime.datetime.strptime(sample_date_str, "%Y-%m-%d")
-                    display_date = sample_dt.strftime("%d/%m/%Y")
-                except Exception:
-                    display_date = sample_date_str
-            if display_date == "-":
-                try:
-                    order_dt = datetime.datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
-                    display_date = order_dt.strftime("%d/%m/%Y %H:%M")
-                except Exception:
-                    display_date = date_str or "-"
-            patient_name = " ".join(part for part in [(first or "").upper(), (last or "").upper()] if part).strip() or "-"
-            doc_text = " ".join(part for part in (doc_type, doc_number) if part).strip() or "-"
-            age_display = str(age_years) if age_years not in (None, "") else "-"
-            context = {
-                "patient": {"sex": sex, "birth_date": birth_date},
-                "order": {"age_years": age_years}
-            }
-            summary_items = self._build_registry_summary(test_name, result, context=context)
-            if not summary_items:
-                continue
-            result_text = "; ".join(summary_items)
-            activity_data.append({
-                "order_id": order_id,
-                "date": display_date,
-                "order_date_raw": date_str,
-                "sample_date_raw": sample_date_str,
-                "patient": patient_name,
-                "document": doc_text,
-                "doc_type": doc_type,
-                "doc_number": doc_number,
-                "birth_date": birth_date,
-                "hcl": hcl,
-                "age": age_display,
-                "test": test_name,
-                "result": result_text,
-                "summary_items": summary_items,
-                "category": category,
-                "order_observations": order_obs,
-                "emitted": None,
-                "emitted_at": None,
-                "first_name": first,
-                "last_name": last
-            })
-        self._activity_cache = {
-            "data": activity_data,
-            "description": description,
-            "start": start_dt,
-            "end": end_dt
-        }
-        self.activity_table.setRowCount(len(activity_data))
-        for row_idx, item in enumerate(activity_data):
-            self.activity_table.setItem(row_idx, 0, QTableWidgetItem(item["date"]))
-            order_item = QTableWidgetItem(str(item["order_id"]))
-            order_item.setTextAlignment(Qt.AlignCenter)
-            self.activity_table.setItem(row_idx, 1, order_item)
-            self.activity_table.setItem(row_idx, 2, QTableWidgetItem(item["patient"]))
-            self.activity_table.setItem(row_idx, 3, QTableWidgetItem(item["document"]))
-            age_item = QTableWidgetItem(item["age"])
-            age_item.setTextAlignment(Qt.AlignCenter)
-            self.activity_table.setItem(row_idx, 4, age_item)
-            self.activity_table.setItem(row_idx, 5, QTableWidgetItem(item["test"]))
-            self.activity_table.setItem(row_idx, 6, QTableWidgetItem(item["result"]))
-        if hasattr(self, 'activity_caption'):
-            self.activity_caption.setText(
-                f"Registro de pruebas: {description} - {len(activity_data)} resultado(s)"
-            )
+        dialog.text_edit.setPlainText("Duplicidad de registro")
+        if dialog.exec_() != QDialog.Accepted:
+            return
+        reason = dialog.get_reason() or "Sin motivo"
+        removed = 0
+        for entry_id in selected_ids:
+            if self.labdb.delete_order_test(entry_id, reason, self.user.get('id')):
+                removed += 1
+        if removed:
+            QMessageBox.information(self, "Resultados eliminados", f"Se eliminaron {removed} resultado(s) del registro.")
+            self.load_activity_summary()
+            self.populate_pending_orders()
+            self.populate_completed_orders()
+        else:
+            QMessageBox.warning(self, "Sin cambios", "No se eliminaron registros. Verifique el estado de las órdenes seleccionadas.")
 
     def export_activity_record(self, fmt):
         if fmt not in {"pdf", "csv"}:
@@ -3671,6 +4046,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'history_open_btn'):
             self.history_open_btn.setEnabled(has_selection)
 
+
     def search_patient_history(self):
         if not hasattr(self, 'history_table'):
             return
@@ -3702,7 +4078,11 @@ class MainWindow(QMainWindow):
                 age_years,
                 order_obs,
                 emitted,
-                emitted_at
+                emitted_at,
+                sample_status,
+                sample_issue,
+                observation,
+                entry_id
             ) = row
             display_date = "-"
             if sample_date_str:
@@ -3729,6 +4109,7 @@ class MainWindow(QMainWindow):
                 continue
             result_text = "; ".join(summary_items)
             records.append({
+                "entry_id": entry_id,
                 "order_id": order_id,
                 "date": display_date,
                 "order_date_raw": date_str,
@@ -3748,7 +4129,10 @@ class MainWindow(QMainWindow):
                 "emitted": emitted,
                 "emitted_at": emitted_at,
                 "first_name": first_name,
-                "last_name": last_name
+                "last_name": last_name,
+                "sample_status": sample_status,
+                "sample_issue": sample_issue,
+                "observation": observation
             })
         aggregated = self._aggregate_results_by_order(records)
         self._history_results = aggregated
@@ -3772,10 +4156,10 @@ class MainWindow(QMainWindow):
                 entry.get("patient", "-"),
                 entry.get("document", "-"),
                 entry.get("age", "-"),
-                "\n".join(entry.get("groups", {}).get("hematology", [])) or "-",
-                "\n".join(entry.get("groups", {}).get("biochemistry", [])) or "-",
-                "\n".join(entry.get("groups", {}).get("micro_parasito", [])) or "-",
-                "\n".join(entry.get("groups", {}).get("others", [])) or "-",
+                "\n  ".join(entry.get("groups", {}).get("hematology", [])) or "-",
+                "\n  ".join(entry.get("groups", {}).get("biochemistry", [])) or "-",
+                "\n  ".join(entry.get("groups", {}).get("micro_parasito", [])) or "-",
+                "\n  ".join(entry.get("groups", {}).get("others", [])) or "-",
                 self._format_emission_status(entry.get("emitted"), entry.get("emitted_at"))
             ]
             for col_idx, value in enumerate(values):
