@@ -2904,66 +2904,66 @@ class MainWindow(QMainWindow):
         self._refresh_completed_combo()
 
 
-def delete_order_from_results(self):
-    if not hasattr(self, 'combo_orders'):
-        return
-    data = self.combo_orders.currentData()
-    if data is None:
-        QMessageBox.information(self, "Sin selección", "Seleccione una orden pendiente para eliminar.")
-        return
-    self._confirm_delete_order(int(data))
+    def delete_order_from_results(self):
+        if not hasattr(self, 'combo_orders'):
+            return
+        data = self.combo_orders.currentData()
+        if data is None:
+            QMessageBox.information(self, "Sin selección", "Seleccione una orden pendiente para eliminar.")
+            return
+        self._confirm_delete_order(int(data))
 
-def delete_order_from_emission(self):
-    if not hasattr(self, 'combo_completed'):
-        return
-    data = self.combo_completed.currentData()
-    if data is None:
-        QMessageBox.information(self, "Sin selección", "Seleccione una orden completada para eliminar.")
-        return
-    self._confirm_delete_order(int(data))
+    def delete_order_from_emission(self):
+        if not hasattr(self, 'combo_completed'):
+            return
+        data = self.combo_completed.currentData()
+        if data is None:
+            QMessageBox.information(self, "Sin selección", "Seleccione una orden completada para eliminar.")
+            return
+        self._confirm_delete_order(int(data))
 
-def _confirm_delete_order(self, order_id):
-    if not order_id:
-        return
-    info = self.labdb.get_order_details(order_id)
-    if not info:
-        QMessageBox.warning(self, "Orden no disponible", "La orden seleccionada ya no está disponible.")
-        self.populate_pending_orders()
-        self.populate_completed_orders()
-        return
-    pat = info.get("patient", {})
-    ord_inf = info.get("order", {})
-    patient_name = pat.get("name") or "-"
-    confirm = QMessageBox.question(
-        self,
-        "Eliminar orden",
-        f"¿Desea eliminar la orden #{order_id} asociada a {patient_name}?",
-        QMessageBox.Yes | QMessageBox.No
-    )
-    if confirm == QMessageBox.No:
-        return
-    dialog = ReasonDialog(
-        "Motivo de eliminación",
-        "Indique el motivo por el que se elimina la orden.",
-        self,
-        placeholder="Motivo (ej. duplicado, prueba, error de digitación)"
-    )
-    dialog.text_edit.setPlainText("Duplicidad de registro")
-    if dialog.exec_() != QDialog.Accepted:
-        return
-    reason = dialog.get_reason() or "Sin motivo"
-    deleted = self.labdb.mark_order_deleted(order_id, reason, self.user.get('id'))
-    if deleted:
-        QMessageBox.information(self, "Orden eliminada", f"La orden #{order_id} fue eliminada correctamente.")
-        if getattr(self, 'selected_order_id', None) == order_id:
-            self.selected_order_id = None
-        self.populate_pending_orders()
-        self.populate_completed_orders()
-        self.load_activity_summary()
-        self.output_text.clear()
-        self._clear_results_layout()
-    else:
-        QMessageBox.warning(self, "Sin cambios", "No se pudo eliminar la orden seleccionada.")
+    def _confirm_delete_order(self, order_id):
+        if not order_id:
+            return
+        info = self.labdb.get_order_details(order_id)
+        if not info:
+            QMessageBox.warning(self, "Orden no disponible", "La orden seleccionada ya no está disponible.")
+            self.populate_pending_orders()
+            self.populate_completed_orders()
+            return
+        pat = info.get("patient", {})
+        ord_inf = info.get("order", {})
+        patient_name = pat.get("name") or "-"
+        confirm = QMessageBox.question(
+            self,
+            "Eliminar orden",
+            f"¿Desea eliminar la orden #{order_id} asociada a {patient_name}?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if confirm == QMessageBox.No:
+            return
+        dialog = ReasonDialog(
+            "Motivo de eliminación",
+            "Indique el motivo por el que se elimina la orden.",
+            self,
+            placeholder="Motivo (ej. duplicado, prueba, error de digitación)"
+        )
+        dialog.text_edit.setPlainText("Duplicidad de registro")
+        if dialog.exec_() != QDialog.Accepted:
+            return
+        reason = dialog.get_reason() or "Sin motivo"
+        deleted = self.labdb.mark_order_deleted(order_id, reason, self.user.get('id'))
+        if deleted:
+            QMessageBox.information(self, "Orden eliminada", f"La orden #{order_id} fue eliminada correctamente.")
+            if getattr(self, 'selected_order_id', None) == order_id:
+                self.selected_order_id = None
+            self.populate_pending_orders()
+            self.populate_completed_orders()
+            self.load_activity_summary()
+            self.output_text.clear()
+            self._clear_results_layout()
+        else:
+            QMessageBox.warning(self, "Sin cambios", "No se pudo eliminar la orden seleccionada.")
 
     def add_tests_to_selected_order(self):
         data = self.combo_completed.currentData() if hasattr(self, 'combo_completed') else None
@@ -3691,111 +3691,111 @@ def _confirm_delete_order(self, order_id):
         return start_dt, end_dt, description
 
 
-def load_activity_summary(self):
-    if not hasattr(self, 'activity_table'):
-        return
-    start_dt, end_dt, description = self._get_selected_range()
-    rows = self.labdb.get_results_in_range(
-        start_dt.strftime("%Y-%m-%d %H:%M:%S"),
-        end_dt.strftime("%Y-%m-%d %H:%M:%S")
-    )
-    activity_data = []
-    for (
-        test_entry_id,
-        order_id,
-        date_str,
-        sample_date_str,
-        first,
-        last,
-        doc_type,
-        doc_number,
-        sex,
-        birth_date,
-        hcl,
-        age_years,
-        order_obs,
-        test_name,
-        category,
-        result,
-        sample_status,
-        sample_issue,
-        observation
-    ) in rows:
-        display_date = "-"
-        if sample_date_str:
-            try:
-                sample_dt = datetime.datetime.strptime(sample_date_str, "%Y-%m-%d")
-                display_date = sample_dt.strftime("%d/%m/%Y")
-            except Exception:
-                display_date = sample_date_str
-        if display_date == "-":
-            try:
-                order_dt = datetime.datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
-                display_date = order_dt.strftime("%d/%m/%Y %H:%M")
-            except Exception:
-                display_date = date_str or "-"
-        patient_name = " ".join(part for part in [(first or "").upper(), (last or "").upper()] if part).strip() or "-"
-        doc_text = " ".join(part for part in (doc_type, doc_number) if part).strip() or "-"
-        age_display = str(age_years) if age_years not in (None, "") else "-"
-        context = {
-            "patient": {"sex": sex, "birth_date": birth_date},
-            "order": {"age_years": age_years}
-        }
-        summary_items = self._build_registry_summary(test_name, result, context=context)
-        if not summary_items:
-            continue
-        result_text = "; ".join(summary_items)
-        activity_data.append({
-            "entry_id": test_entry_id,
-            "order_id": order_id,
-            "date": display_date,
-            "order_date_raw": date_str,
-            "sample_date_raw": sample_date_str,
-            "patient": patient_name,
-            "document": doc_text,
-            "doc_type": doc_type,
-            "doc_number": doc_number,
-            "birth_date": birth_date,
-            "hcl": hcl,
-            "age": age_display,
-            "test": test_name,
-            "result": result_text,
-            "summary_items": summary_items,
-            "category": category,
-            "order_observations": order_obs,
-            "emitted": None,
-            "emitted_at": None,
-            "first_name": first,
-            "last_name": last,
-            "sample_status": sample_status,
-            "sample_issue": sample_issue,
-            "observation": observation
-        })
-    self._activity_cache = {
-        "data": activity_data,
-        "description": description,
-        "start": start_dt,
-        "end": end_dt
-    }
-    self.activity_table.setRowCount(len(activity_data))
-    for row_idx, item in enumerate(activity_data):
-        self.activity_table.setItem(row_idx, 0, QTableWidgetItem(item["date"]))
-        order_item = QTableWidgetItem(str(item["order_id"]))
-        order_item.setTextAlignment(Qt.AlignCenter)
-        self.activity_table.setItem(row_idx, 1, order_item)
-        self.activity_table.setItem(row_idx, 2, QTableWidgetItem(item["patient"]))
-        self.activity_table.setItem(row_idx, 3, QTableWidgetItem(item["document"]))
-        age_item = QTableWidgetItem(item["age"])
-        age_item.setTextAlignment(Qt.AlignCenter)
-        self.activity_table.setItem(row_idx, 4, age_item)
-        self.activity_table.setItem(row_idx, 5, QTableWidgetItem(item["test"]))
-        status_text = self._format_sample_status_text(item.get("sample_status"), item.get("sample_issue"))
-        self.activity_table.setItem(row_idx, 6, QTableWidgetItem(status_text or "-"))
-        self.activity_table.setItem(row_idx, 7, QTableWidgetItem(item["result"]))
-    if hasattr(self, 'activity_caption'):
-        self.activity_caption.setText(
-            f"Registro de pruebas: {description} - {len(activity_data)} resultado(s)"
+    def load_activity_summary(self):
+        if not hasattr(self, 'activity_table'):
+            return
+        start_dt, end_dt, description = self._get_selected_range()
+        rows = self.labdb.get_results_in_range(
+            start_dt.strftime("%Y-%m-%d %H:%M:%S"),
+            end_dt.strftime("%Y-%m-%d %H:%M:%S")
         )
+        activity_data = []
+        for (
+            test_entry_id,
+            order_id,
+            date_str,
+            sample_date_str,
+            first,
+            last,
+            doc_type,
+            doc_number,
+            sex,
+            birth_date,
+            hcl,
+            age_years,
+            order_obs,
+            test_name,
+            category,
+            result,
+            sample_status,
+            sample_issue,
+            observation
+        ) in rows:
+            display_date = "-"
+            if sample_date_str:
+                try:
+                    sample_dt = datetime.datetime.strptime(sample_date_str, "%Y-%m-%d")
+                    display_date = sample_dt.strftime("%d/%m/%Y")
+                except Exception:
+                    display_date = sample_date_str
+            if display_date == "-":
+                try:
+                    order_dt = datetime.datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
+                    display_date = order_dt.strftime("%d/%m/%Y %H:%M")
+                except Exception:
+                    display_date = date_str or "-"
+            patient_name = " ".join(part for part in [(first or "").upper(), (last or "").upper()] if part).strip() or "-"
+            doc_text = " ".join(part for part in (doc_type, doc_number) if part).strip() or "-"
+            age_display = str(age_years) if age_years not in (None, "") else "-"
+            context = {
+                "patient": {"sex": sex, "birth_date": birth_date},
+                "order": {"age_years": age_years}
+            }
+            summary_items = self._build_registry_summary(test_name, result, context=context)
+            if not summary_items:
+                continue
+            result_text = "; ".join(summary_items)
+            activity_data.append({
+                "entry_id": test_entry_id,
+                "order_id": order_id,
+                "date": display_date,
+                "order_date_raw": date_str,
+                "sample_date_raw": sample_date_str,
+                "patient": patient_name,
+                "document": doc_text,
+                "doc_type": doc_type,
+                "doc_number": doc_number,
+                "birth_date": birth_date,
+                "hcl": hcl,
+                "age": age_display,
+                "test": test_name,
+                "result": result_text,
+                "summary_items": summary_items,
+                "category": category,
+                "order_observations": order_obs,
+                "emitted": None,
+                "emitted_at": None,
+                "first_name": first,
+                "last_name": last,
+                "sample_status": sample_status,
+                "sample_issue": sample_issue,
+                "observation": observation
+            })
+        self._activity_cache = {
+            "data": activity_data,
+            "description": description,
+            "start": start_dt,
+            "end": end_dt
+        }
+        self.activity_table.setRowCount(len(activity_data))
+        for row_idx, item in enumerate(activity_data):
+            self.activity_table.setItem(row_idx, 0, QTableWidgetItem(item["date"]))
+            order_item = QTableWidgetItem(str(item["order_id"]))
+            order_item.setTextAlignment(Qt.AlignCenter)
+            self.activity_table.setItem(row_idx, 1, order_item)
+            self.activity_table.setItem(row_idx, 2, QTableWidgetItem(item["patient"]))
+            self.activity_table.setItem(row_idx, 3, QTableWidgetItem(item["document"]))
+            age_item = QTableWidgetItem(item["age"])
+            age_item.setTextAlignment(Qt.AlignCenter)
+            self.activity_table.setItem(row_idx, 4, age_item)
+            self.activity_table.setItem(row_idx, 5, QTableWidgetItem(item["test"]))
+            status_text = self._format_sample_status_text(item.get("sample_status"), item.get("sample_issue"))
+            self.activity_table.setItem(row_idx, 6, QTableWidgetItem(status_text or "-"))
+            self.activity_table.setItem(row_idx, 7, QTableWidgetItem(item["result"]))
+        if hasattr(self, 'activity_caption'):
+            self.activity_caption.setText(
+                f"Registro de pruebas: {description} - {len(activity_data)} resultado(s)"
+            )
 
 
     def delete_selected_activity_entries(self):
