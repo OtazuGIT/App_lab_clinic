@@ -1,0 +1,712 @@
+diff --git a/main_window.py b/main_window.py
+index 223194fb41348238812b5c65d2d9922fedfac649..ec9bede5c9f799c8db51155164b34081b80f9af6 100644
+--- a/main_window.py
++++ b/main_window.py
+@@ -1,37 +1,38 @@
+ # main_window.py
+ import copy
+ import datetime
+ import json
+ import os
+ import re
+ import unicodedata
+ from collections import OrderedDict
+ from PyQt5.QtWidgets import (QMainWindow, QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout,
+                              QStackedWidget, QFormLayout, QScrollArea, QGroupBox, QComboBox,
+                              QLineEdit, QTextEdit, QTableWidget, QTableWidgetItem, QFileDialog, QMessageBox, QCheckBox,
+-                             QDateEdit, QRadioButton, QButtonGroup, QDialog, QDialogButtonBox, QListWidget, QListWidgetItem)
++                             QDateEdit, QRadioButton, QButtonGroup, QDialog, QDialogButtonBox, QListWidget, QListWidgetItem,
++                             QSpinBox)
+ from PyQt5.QtCore import QDate, QDateTime, Qt, QTimer
+ from fpdf import FPDF  # Asegúrese de tener fpdf instalado (pip install fpdf)
+ 
+ LAB_TITLE = "Laboratorio P.S. Iñapari - 002789"
+ 
+ REGISTRY_ABBREVIATIONS = {
+     "hematocrito": "Hto",
+     "hematocrito (hto)": "Hto",
+     "hemoglobina": "Hb",
+     "hemoglobina (hb)": "Hb",
+     "hemoglobina - hematocrito": "Hb/Hto",
+     "hemoglobina hematocrito": "Hb/Hto",
+     "leucocitos": "Leu",
+     "leucocitos totales": "Leu",
+     "recuento de leucocitos": "Leu",
+     "recuento de hematies": "RBC",
+     "recuento de hematies (rbc)": "RBC",
+     "hematies": "RBC",
+     "plaquetas": "Plaq",
+     "recuento de plaquetas": "Plaq",
+     "plaquetas totales": "Plaq",
+     "vcm": "VCM",
+     "hcm": "HCM",
+     "chcm": "CHCM",
+     "rdw": "RDW",
+diff --git a/main_window.py b/main_window.py
+index 223194fb41348238812b5c65d2d9922fedfac649..ec9bede5c9f799c8db51155164b34081b80f9af6 100644
+--- a/main_window.py
++++ b/main_window.py
+@@ -1222,50 +1223,70 @@ class MainWindow(QMainWindow):
+         form_layout.addRow("Documento:", doc_hlayout)
+         self.input_first_name = QLineEdit(); form_layout.addRow("Nombre:", self.input_first_name)
+         self.input_last_name = QLineEdit(); form_layout.addRow("Apellidos:", self.input_last_name)
+         # Fecha de nacimiento y edad calculada automáticamente (editable)
+         self.input_birth_date = QDateEdit()
+         self.input_birth_date.setDisplayFormat("dd-MM-yyyy")
+         self.input_birth_date.setCalendarPopup(True)
+         self.input_birth_date.setDate(QDate.currentDate())
+         self.input_birth_date.dateChanged.connect(self.update_age_from_birth_date)
+         form_layout.addRow("F. Nacimiento:", self.input_birth_date)
+         self.input_age = QLineEdit()
+         self.input_age.setPlaceholderText("Edad estimada")
+         form_layout.addRow("Edad:", self.input_age)
+         # Sexo como botones exclusivos
+         self.sex_male_radio = QRadioButton("Masculino")
+         self.sex_female_radio = QRadioButton("Femenino")
+         self.sex_group = QButtonGroup(self.page_registro)
+         self.sex_group.addButton(self.sex_male_radio)
+         self.sex_group.addButton(self.sex_female_radio)
+         self.sex_male_radio.setChecked(True)
+         sex_layout = QHBoxLayout()
+         sex_layout.addWidget(self.sex_male_radio)
+         sex_layout.addWidget(self.sex_female_radio)
+         sex_layout.addStretch()
+         form_layout.addRow("Sexo:", sex_layout)
++        self.pregnancy_checkbox = QCheckBox("Paciente gestante")
++        self.pregnancy_checkbox.stateChanged.connect(self.on_pregnancy_toggle)
++        self.gestational_weeks_spin = QSpinBox()
++        self.gestational_weeks_spin.setRange(0, 45)
++        self.gestational_weeks_spin.setSuffix(" sem")
++        self.gestational_weeks_spin.setEnabled(False)
++        self.expected_delivery_date = QDateEdit(QDate.currentDate())
++        self.expected_delivery_date.setDisplayFormat("dd-MM-yyyy")
++        self.expected_delivery_date.setCalendarPopup(True)
++        self.expected_delivery_date.setEnabled(False)
++        pregnancy_layout = QHBoxLayout()
++        pregnancy_layout.addWidget(self.pregnancy_checkbox)
++        pregnancy_layout.addSpacing(8)
++        pregnancy_layout.addWidget(QLabel("Edad gestacional:"))
++        pregnancy_layout.addWidget(self.gestational_weeks_spin)
++        pregnancy_layout.addSpacing(8)
++        pregnancy_layout.addWidget(QLabel("FPP:"))
++        pregnancy_layout.addWidget(self.expected_delivery_date)
++        pregnancy_layout.addStretch()
++        form_layout.addRow("Gestación:", pregnancy_layout)
+         # Procedencia con opción rápida P.S Iñapari u otros
+         self.origin_combo = QComboBox()
+         self.origin_combo.addItems(["P.S Iñapari", "Otros"])
+         self.origin_combo.currentIndexChanged.connect(self.on_origin_changed)
+         self.input_origin_other = QLineEdit()
+         self.input_origin_other.setPlaceholderText("Especifique procedencia")
+         self.input_origin_other.setEnabled(False)
+         origin_layout = QHBoxLayout()
+         origin_layout.addWidget(self.origin_combo)
+         origin_layout.addWidget(self.input_origin_other)
+         form_layout.addRow("Procedencia:", origin_layout)
+         self.input_hcl = QLineEdit(); form_layout.addRow("HCL:", self.input_hcl)
+         self.input_height = QLineEdit(); self.input_height.setPlaceholderText("cm")
+         form_layout.addRow("Talla (cm):", self.input_height)
+         self.input_weight = QLineEdit(); self.input_weight.setPlaceholderText("kg")
+         form_layout.addRow("Peso (kg):", self.input_weight)
+         self.input_blood_pressure = QLineEdit(); self.input_blood_pressure.setPlaceholderText("ej. 120/80")
+         form_layout.addRow("Presión Art.:", self.input_blood_pressure)
+         self.input_diagnosis = QLineEdit(); self.input_diagnosis.setPlaceholderText("Ej. Síndrome febril")
+         form_layout.addRow("Diagnóstico presuntivo:", self.input_diagnosis)
+         self.input_observations = QLineEdit()
+         self.input_observations.setPlaceholderText("Observaciones (laboratorio)")
+         self.input_observations.setText("N/A")
+         obs_layout = QHBoxLayout()
+         obs_layout.addWidget(self.input_observations)
+diff --git a/main_window.py b/main_window.py
+index 223194fb41348238812b5c65d2d9922fedfac649..ec9bede5c9f799c8db51155164b34081b80f9af6 100644
+--- a/main_window.py
++++ b/main_window.py
+@@ -1278,61 +1299,63 @@ class MainWindow(QMainWindow):
+         self.sample_date_edit.setDisplayFormat("dd-MM-yyyy")
+         self.sample_date_edit.setCalendarPopup(True)
+         self.sample_date_edit.setDate(QDate.currentDate())
+         self.sample_today_checkbox = QCheckBox("Hoy")
+         self.sample_today_checkbox.setChecked(True)
+         self.sample_today_checkbox.stateChanged.connect(self.on_sample_today_toggle)
+         self.sample_date_edit.setEnabled(False)
+         sample_layout = QHBoxLayout()
+         sample_layout.addWidget(self.sample_date_edit)
+         sample_layout.addWidget(self.sample_today_checkbox)
+         sample_layout.addStretch()
+         form_layout.addRow("F. muestra:", sample_layout)
+         self.input_requested_by = QComboBox()
+         self.input_requested_by.setEditable(True)
+         self.input_requested_by.setInsertPolicy(QComboBox.NoInsert)
+         self.input_requested_by.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+         form_layout.addRow("Solicitante:", self.input_requested_by)
+         # Placeholder después de crear el combo editable
+         if self.input_requested_by.lineEdit():
+             self.input_requested_by.lineEdit().setPlaceholderText("Seleccione o escriba el médico solicitante")
+         self.populate_requesters()
+         top_layout.addLayout(form_layout)
+         # Listado de pruebas por categoría (con scroll)
+         tests_scroll = QScrollArea(); tests_scroll.setWidgetResizable(True)
+         tests_container = QWidget(); tests_layout = QVBoxLayout(tests_container)
++        self.test_checkboxes = []
+         # Obtener pruebas agrupadas por categoría de la BD
+         categories = {}
+         self.labdb.cur.execute("SELECT category, name FROM tests")
+         for cat, name in self.labdb.cur.fetchall():
+             categories.setdefault(cat, []).append(name)
+         for cat, tests in categories.items():
+             group_box = QGroupBox(cat)
+             group_layout = QVBoxLayout()
+             for test_name in tests:
+                 cb = QCheckBox(test_name)
+                 group_layout.addWidget(cb)
++                self.test_checkboxes.append(cb)
+             group_box.setLayout(group_layout)
+             tests_layout.addWidget(group_box)
+         tests_layout.addStretch()
+         tests_scroll.setWidget(tests_container)
+         top_layout.addWidget(tests_scroll)
+         layout.addLayout(top_layout)
+         # Botones de acción
+         btn_register = QPushButton("Registrar paciente y pruebas")
+         btn_new = QPushButton("Registrar nuevo paciente")
+         btn_to_results = QPushButton("Anotar resultado de este paciente")
+         btn_to_results.setEnabled(False)
+         btn_register.clicked.connect(lambda: self.register_patient(btn_to_results))
+         btn_new.clicked.connect(self.clear_registration_form)
+         btn_to_results.clicked.connect(self.go_to_results)
+         btns_layout = QHBoxLayout()
+         btns_layout.addWidget(btn_register); btns_layout.addWidget(btn_new); btns_layout.addWidget(btn_to_results)
+         layout.addLayout(btns_layout)
+     def populate_requesters(self, keep_current=False):
+         current_text = self.input_requested_by.currentText().strip() if keep_current else ""
+         items_lower = set()
+         self.input_requested_by.blockSignals(True)
+         self.input_requested_by.clear()
+         self.input_requested_by.addItem("N/A")
+         for requester in self.labdb.get_distinct_requesters():
+             clean = requester.strip()
+diff --git a/main_window.py b/main_window.py
+index 223194fb41348238812b5c65d2d9922fedfac649..ec9bede5c9f799c8db51155164b34081b80f9af6 100644
+--- a/main_window.py
++++ b/main_window.py
+@@ -1353,101 +1376,132 @@ class MainWindow(QMainWindow):
+             if self.input_requested_by.currentIndex() <= 0:
+                 self.input_requested_by.lineEdit().clear()
+             else:
+                 self.input_requested_by.lineEdit().setText(self.input_requested_by.currentText())
+             self.input_requested_by.lineEdit().setPlaceholderText("Seleccione o escriba el médico solicitante")
+     def update_age_from_birth_date(self, qdate=None):
+         if qdate is None:
+             qdate = self.input_birth_date.date()
+         if isinstance(qdate, QDate) and qdate.isValid():
+             years = max(0, qdate.daysTo(QDate.currentDate()) // 365)
+             self.input_age.setText(str(years))
+         else:
+             self.input_age.clear()
+     def on_origin_changed(self, index):
+         use_other = self.origin_combo.currentText() == "Otros"
+         self.input_origin_other.setEnabled(use_other)
+         if not use_other:
+             self.input_origin_other.clear()
+ 
+     def on_sample_today_toggle(self, state):
+         use_today = state == Qt.Checked
+         if hasattr(self, 'sample_date_edit'):
+             self.sample_date_edit.setEnabled(not use_today)
+             if use_today:
+                 self.sample_date_edit.setDate(QDate.currentDate())
++    def on_pregnancy_toggle(self, state):
++        is_checked = state == Qt.Checked
++        if hasattr(self, 'gestational_weeks_spin'):
++            self.gestational_weeks_spin.setEnabled(is_checked)
++            if not is_checked:
++                self.gestational_weeks_spin.setValue(0)
++        if hasattr(self, 'expected_delivery_date'):
++            self.expected_delivery_date.setEnabled(is_checked)
++            if not is_checked:
++                self.expected_delivery_date.setDate(QDate.currentDate())
+     def get_current_origin(self):
+         if self.origin_combo.currentText() == "Otros":
+             other = self.input_origin_other.text().strip()
+             return other if other else "Otros"
+         return "P.S Iñapari"
+     def set_origin_value(self, value):
+         if value and value.strip().lower() not in ("p.s iñapari", "ps iñapari", "p.s. iñapari"):
+             self.origin_combo.setCurrentIndex(1)
+             self.input_origin_other.setEnabled(True)
+             self.input_origin_other.setText(value)
+         else:
+             self.origin_combo.setCurrentIndex(0)
+             self.input_origin_other.setEnabled(False)
+             self.input_origin_other.clear()
+     def _format_number(self, value):
+         if value in (None, ""):
+             return ""
+         if isinstance(value, float):
+             if value.is_integer():
+                 return str(int(value))
+             return f"{value:.2f}".rstrip('0').rstrip('.')
+         return str(value)
+     def autofill_patient(self):
+         doc_type = self.input_doc_type.currentText()
+         doc_number = self.input_doc_number.text().strip()
+         if doc_number == "":
+             return
+         patient = self.labdb.find_patient(doc_type, doc_number)
+         if patient:
+             # Rellenar campos con datos existentes
+-            _, _, _, first_name, last_name, birth_date, sex, origin, hcl, height, weight, blood_pressure = patient
++            (_, _, _, first_name, last_name, birth_date, sex, origin, hcl,
++             height, weight, blood_pressure, is_pregnant, gest_age, expected_delivery) = patient
+             self.input_first_name.setText((first_name or "").upper()); self.input_last_name.setText((last_name or "").upper())
+             if birth_date:
+                 bd = QDate.fromString(birth_date, "yyyy-MM-dd")
+                 if bd.isValid():
+                     self.input_birth_date.setDate(bd)
+                 else:
+                     self.input_birth_date.setDate(QDate.currentDate())
+                     self.input_age.clear()
+             else:
+                 self.input_birth_date.setDate(QDate.currentDate())
+                 self.input_age.clear()
+             if sex == "Femenino":
+                 self.sex_female_radio.setChecked(True)
+             else:
+                 self.sex_male_radio.setChecked(True)
+             self.set_origin_value(origin or "")
+             self.input_hcl.setText(hcl or "")
+             self.input_height.setText(self._format_number(height))
+             self.input_weight.setText(self._format_number(weight))
+             self.input_blood_pressure.setText(blood_pressure or "")
++            preg_flag = bool(is_pregnant) if is_pregnant not in (None, "") else False
++            self.pregnancy_checkbox.blockSignals(True)
++            self.pregnancy_checkbox.setChecked(preg_flag)
++            self.pregnancy_checkbox.blockSignals(False)
++            self.on_pregnancy_toggle(Qt.Checked if preg_flag else Qt.Unchecked)
++            if preg_flag:
++                if gest_age is not None:
++                    try:
++                        self.gestational_weeks_spin.setValue(int(gest_age))
++                    except (TypeError, ValueError):
++                        self.gestational_weeks_spin.setValue(0)
++                if expected_delivery:
++                    edd = QDate.fromString(expected_delivery, "yyyy-MM-dd")
++                    if edd.isValid():
++                        self.expected_delivery_date.setDate(edd)
++                    else:
++                        self.expected_delivery_date.setDate(QDate.currentDate())
++            else:
++                self.gestational_weeks_spin.setValue(0)
++                self.expected_delivery_date.setDate(QDate.currentDate())
+             QMessageBox.information(self, "Paciente encontrado", "Datos del paciente cargados.")
+     def register_patient(self, btn_to_results):
+         doc_type = self.input_doc_type.currentText()
+         doc_number = self.input_doc_number.text().strip()
+         if doc_number == "" or self.input_first_name.text().strip() == "" or self.input_last_name.text().strip() == "":
+             QMessageBox.warning(self, "Datos incompletos", "Ingrese al menos Documento, Nombre y Apellidos.")
+             return
+         # Validar formato de documento
+         if doc_type == "DNI":
+             if len(doc_number) != 8 or not doc_number.isdigit():
+                 QMessageBox.warning(self, "Documento inválido", "El DNI debe tener 8 dígitos.")
+                 return
+         else:
+             if len(doc_number) > 20:
+                 QMessageBox.warning(self, "Documento inválido", f"El {doc_type} no debe exceder 20 caracteres.")
+                 return
+         # Obtener datos del formulario
+         first_name = self.input_first_name.text().strip().upper()
+         last_name = self.input_last_name.text().strip().upper()
+         self.input_first_name.setText(first_name)
+         self.input_last_name.setText(last_name)
+         birth_date = self.input_birth_date.date().toString("yyyy-MM-dd")
+         sex = "Femenino" if self.sex_female_radio.isChecked() else "Masculino"
+         origin = self.get_current_origin()
+         if self.origin_combo.currentText() == "Otros" and (not self.input_origin_other.text().strip()):
+diff --git a/main_window.py b/main_window.py
+index 223194fb41348238812b5c65d2d9922fedfac649..ec9bede5c9f799c8db51155164b34081b80f9af6 100644
+--- a/main_window.py
++++ b/main_window.py
+@@ -1459,119 +1513,153 @@ class MainWindow(QMainWindow):
+         bp = self.input_blood_pressure.text().strip()
+         diagnosis = self.input_diagnosis.text().strip()
+         observations = self.input_observations.text().strip() or "N/A"
+         requested_by_text = self.input_requested_by.currentText().strip() if self.input_requested_by.count() else ""
+         if requested_by_text == "":
+             requested_by_text = "N/A"
+         if diagnosis == "":
+             diagnosis = "N/A"
+         age_text = self.input_age.text().strip()
+         if age_text:
+             try:
+                 age_years = int(age_text)
+             except ValueError:
+                 QMessageBox.warning(self, "Edad inválida", "Ingrese la edad en años utilizando solo números enteros.")
+                 return
+         else:
+             age_years = None
+         try:
+             height_val = float(height) if height else None
+         except:
+             height_val = None
+         try:
+             weight_val = float(weight) if weight else None
+         except:
+             weight_val = None
++        is_pregnant = self.pregnancy_checkbox.isChecked() if hasattr(self, 'pregnancy_checkbox') else False
++        gest_age_weeks = None
++        if is_pregnant and hasattr(self, 'gestational_weeks_spin'):
++            gest_age_weeks = self.gestational_weeks_spin.value()
++        expected_delivery_date = None
++        if is_pregnant and hasattr(self, 'expected_delivery_date'):
++            edd_qdate = self.expected_delivery_date.date()
++            if isinstance(edd_qdate, QDate) and edd_qdate.isValid():
++                expected_delivery_date = edd_qdate.toString("yyyy-MM-dd")
+         sample_date = None
+         if hasattr(self, 'sample_date_edit'):
+             qdate = self.sample_date_edit.date()
+             if isinstance(qdate, QDate) and qdate.isValid():
+                 sample_date = qdate.toString("yyyy-MM-dd")
+         if hasattr(self, 'sample_today_checkbox') and self.sample_today_checkbox.isChecked():
+             sample_date = QDate.currentDate().toString("yyyy-MM-dd")
++
+         # Insertar o actualizar paciente en BD
+-        patient_id = self.labdb.add_or_update_patient(doc_type, doc_number, first_name, last_name, birth_date, sex, origin, hcl, height_val, weight_val, bp)
++        patient_id = self.labdb.add_or_update_patient(
++            doc_type,
++            doc_number,
++            first_name,
++            last_name,
++            birth_date,
++            sex,
++            origin,
++            hcl,
++            height_val,
++            weight_val,
++            bp,
++            is_pregnant=is_pregnant,
++            gestational_age_weeks=gest_age_weeks,
++            expected_delivery_date=expected_delivery_date
++        )
++
+         # Obtener lista de pruebas seleccionadas
+-        selected_tests = []
+-        for cb in self.page_registro.findChildren(QCheckBox):
+-            if cb.isChecked():
+-                selected_tests.append(cb.text())
++        selected_tests = [cb.text() for cb in getattr(self, 'test_checkboxes', []) if cb.isChecked()]
++
+         if not selected_tests:
+             QMessageBox.warning(self, "Sin pruebas", "Seleccione al menos una prueba.")
+             return
+         duplicate_order = self.labdb.find_recent_duplicate_order(patient_id, selected_tests)
+         if duplicate_order:
+             reply = QMessageBox.question(
+                 self,
+                 "Posible duplicado",
+                 f"Existe una orden reciente (#{duplicate_order}) con las mismas pruebas. ¿Desea continuar?",
+                 QMessageBox.Yes | QMessageBox.No
+             )
+             if reply == QMessageBox.No:
+                 return
+         # Crear orden en BD con las pruebas seleccionadas
+         order_id = self.labdb.add_order_with_tests(
+             patient_id,
+             selected_tests,
+             self.user['id'],
+             observations=observations,
+             requested_by=requested_by_text,
+             diagnosis=diagnosis,
+             age_years=age_years,
+             sample_date=sample_date
+         )
+         QMessageBox.information(self, "Registro exitoso", f"Paciente y pruebas registrados (Orden #{order_id}).")
+         # Habilitar botón para ir a anotar resultados de esta orden
+         btn_to_results.setEnabled(True)
+         self.last_order_registered = order_id
+         # Actualizar historial de solicitantes para próximas atenciones
+         self.populate_requesters(keep_current=True)
+     def clear_registration_form(self):
+         # Limpiar todos los campos del formulario de registro
+         self.input_doc_number.clear(); self.input_first_name.clear(); self.input_last_name.clear()
+         self.input_birth_date.blockSignals(True)
+         self.input_birth_date.setDate(QDate.currentDate())
+         self.input_birth_date.blockSignals(False)
+         self.input_age.clear()
+         self.sex_male_radio.setChecked(True)
+         self.set_origin_value("P.S Iñapari")
+         self.input_hcl.clear()
+         self.input_height.clear(); self.input_weight.clear(); self.input_blood_pressure.clear()
+         self.input_diagnosis.clear()
+         self.input_observations.setText("N/A")
++        if hasattr(self, 'pregnancy_checkbox'):
++            self.pregnancy_checkbox.blockSignals(True)
++            self.pregnancy_checkbox.setChecked(False)
++            self.pregnancy_checkbox.blockSignals(False)
++            self.on_pregnancy_toggle(Qt.Unchecked)
++        if hasattr(self, 'gestational_weeks_spin'):
++            self.gestational_weeks_spin.setValue(0)
++        if hasattr(self, 'expected_delivery_date'):
++            self.expected_delivery_date.setDate(QDate.currentDate())
+         if hasattr(self, 'sample_date_edit'):
+             self.sample_date_edit.blockSignals(True)
+             self.sample_date_edit.setDate(QDate.currentDate())
+             self.sample_date_edit.blockSignals(False)
+         if hasattr(self, 'sample_today_checkbox'):
+             self.sample_today_checkbox.setChecked(True)
+         if self.input_requested_by.count():
+             self.input_requested_by.setCurrentIndex(0)
+         if self.input_requested_by.lineEdit():
+             self.input_requested_by.lineEdit().clear()
+-        for cb in self.page_registro.findChildren(QCheckBox):
++        for cb in getattr(self, 'test_checkboxes', []):
+             cb.setChecked(False)
++
+     def go_to_results(self):
+         # Navegar a la página de resultados para la última orden registrada
+         if self.last_order_registered:
+             self.stack.setCurrentWidget(self.page_resultados)
+             self.populate_pending_orders()
+             # Seleccionar automáticamente la orden recién creada en el combo
+             self._select_order_in_combo(self.combo_orders, self.last_order_registered)
+             self.load_order_fields()
+     def init_resultados_page(self):
+         layout = QVBoxLayout(self.page_resultados)
+         search_layout = QHBoxLayout()
+         search_label = QLabel("Buscar:")
+         self.order_search_input = QLineEdit()
+         self.order_search_input.setPlaceholderText("Nombre, documento o # de orden")
+         search_layout.addWidget(search_label)
+         search_layout.addWidget(self.order_search_input, 1)
+         sort_label = QLabel("Ordenar:")
+         self.pending_sort_combo = QComboBox()
+         self.pending_sort_combo.addItems([
+             "Fecha (recientes primero)",
+             "Fecha (antiguas primero)",
+             "Número de orden (descendente)",
+             "Número de orden (ascendente)"
+         ])
+         search_layout.addWidget(sort_label)
+diff --git a/main_window.py b/main_window.py
+index 223194fb41348238812b5c65d2d9922fedfac649..ec9bede5c9f799c8db51155164b34081b80f9af6 100644
+--- a/main_window.py
++++ b/main_window.py
+@@ -1764,52 +1852,53 @@ class MainWindow(QMainWindow):
+             self.results_layout.addWidget(placeholder)
+             self.results_layout.addStretch()
+             return
+         order_id = int(data)
+         self.selected_order_id = order_id
+         info = self.labdb.get_order_details(order_id)
+         if not info:
+             empty_label = QLabel("La orden seleccionada no tiene pruebas registradas.")
+             empty_label.setStyleSheet("color: #555; font-style: italic;")
+             empty_label.setWordWrap(True)
+             self.results_layout.addWidget(empty_label)
+             self.results_layout.addStretch()
+             self.populate_pending_orders()
+             return
+         patient_info = info.get("patient", {})
+         order_info = info.get("order", {})
+         rows = info.get("results", [])
+         self.current_order_context = {"patient": patient_info, "order": order_info}
+         if not rows:
+             empty_label = QLabel("La orden seleccionada no tiene pruebas asociadas.")
+             empty_label.setStyleSheet("color: #555; font-style: italic;")
+             empty_label.setWordWrap(True)
+             self.results_layout.addWidget(empty_label)
+             self.results_layout.addStretch()
+             return
+-        order_test_names = [name for name, _, _ in rows]
+-        for test_name, raw_result, category in rows:
++        order_test_names = [name for (name, *_rest) in rows]
++        for entry in rows:
++            test_name, raw_result, category = entry[:3]
+             template = None
+             template_name = test_name
+             if test_name == "Hematocrito":
+                 auto_mode = self._should_auto_calculate_hb(order_test_names)
+                 template = build_hematocrit_template(auto_mode)
+                 if auto_mode:
+                     template_name = "Hematocrito (automático)"
+                     TEST_TEMPLATES[template_name] = copy.deepcopy(template)
+             else:
+                 base_template = TEST_TEMPLATES.get(test_name)
+                 if base_template is not None:
+                     template = copy.deepcopy(base_template)
+                 elif category == "PRUEBAS RÁPIDAS":
+                     template = build_bool_observation_template()
+                     TEST_TEMPLATES[test_name] = copy.deepcopy(template)
+             group_box = QGroupBox(test_name)
+             group_box.setStyleSheet("QGroupBox { font-weight: bold; }")
+             container_layout = QVBoxLayout()
+             header_layout = QHBoxLayout()
+             header_layout.addStretch()
+             remove_button = QPushButton("Quitar examen")
+             remove_button.setStyleSheet("QPushButton { font-size: 10px; color: #c0392b; }")
+             remove_button.clicked.connect(lambda _=False, name=test_name: self._prompt_remove_test(name))
+             header_layout.addWidget(remove_button)
+             container_layout.addLayout(header_layout)
+diff --git a/main_window.py b/main_window.py
+index 223194fb41348238812b5c65d2d9922fedfac649..ec9bede5c9f799c8db51155164b34081b80f9af6 100644
+--- a/main_window.py
++++ b/main_window.py
+@@ -3000,50 +3089,72 @@ class MainWindow(QMainWindow):
+         )
+         if reply == QMessageBox.Yes:
+             self.stack.setCurrentWidget(self.page_resultados)
+             if hasattr(self, 'combo_orders'):
+                 self._select_order_in_combo(self.combo_orders, order_id)
+             self.load_order_fields()
+ 
+     def display_selected_result(self):
+         # Mostrar los resultados de la orden seleccionada en el cuadro de texto
+         data = self.combo_completed.currentData()
+         if data is None:
+             return
+         order_id = int(data)
+         info = self.labdb.get_order_details(order_id)
+         if not info:
+             return
+         pat = info["patient"]
+         ord_inf = info["order"]
+         results = info["results"]
+         context = {"patient": pat, "order": ord_inf}
+         doc_text = " ".join([part for part in (pat.get('doc_type'), pat.get('doc_number')) if part]) or "-"
+         lines = [f"PACIENTE: {pat.get('name') or '-'}", f"DOCUMENTO: {doc_text}"]
+         age_value = self._calculate_age_years(pat, ord_inf)
+         lines.append(f"EDAD: {age_value} AÑOS" if age_value is not None else "EDAD: -")
+         lines.append(f"SEXO: {pat.get('sex') or '-'}")
++        pregnancy_flag = pat.get('is_pregnant')
++        gest_weeks = pat.get('gestational_age_weeks')
++        due_raw = pat.get('expected_delivery_date')
++        if pregnancy_flag or due_raw or gest_weeks not in (None, ''):
++            if pregnancy_flag:
++                weeks_text = ''
++                if gest_weeks not in (None, '', 0):
++                    try:
++                        weeks_text = f"{int(gest_weeks)} SEMANAS"
++                    except (TypeError, ValueError):
++                        weeks_text = ''
++                line = 'GESTANTE: SÍ'
++                if weeks_text:
++                    line += f" ({weeks_text})"
++            else:
++                line = 'GESTANTE: NO'
++            lines.append(line)
++            if due_raw:
++                due_display = self._format_short_date(due_raw)
++                if due_display == '—':
++                    due_display = due_raw
++                lines.append(f"FPP: {due_display}")
+         lines.append(f"HISTORIA CLÍNICA: {pat.get('hcl') or '-'}")
+         lines.append(f"PROCEDENCIA: {pat.get('origin') or '-'}")
+         requester = ord_inf.get('requested_by') or '-'
+         lines.append(f"SOLICITANTE: {requester}")
+         emission_raw = ord_inf.get('emitted_at')
+         if emission_raw:
+             try:
+                 emission_dt = datetime.datetime.strptime(emission_raw, "%Y-%m-%d %H:%M:%S")
+                 emission_display = emission_dt.strftime("%d/%m/%Y %H:%M")
+             except Exception:
+                 emission_display = emission_raw
+         else:
+             emission_display = "Pendiente de emisión"
+         lines.append(f"FECHA DEL INFORME: {emission_display}")
+         lines.append(f"FECHA DE REGISTRO: {ord_inf.get('date') or '-'}")
+         lines.append("RESULTADOS:")
+         for test_name, raw_result, _, sample_status, sample_issue, observation, _ in results:
+             formatted_lines = self._format_result_lines(test_name, raw_result, context=context)
+             if formatted_lines:
+                 lines.extend(formatted_lines)
+             status_text = self._format_sample_status_text(sample_status, sample_issue)
+             if status_text:
+                 lines.append(f"    Estado de muestra: {status_text}")
+             if observation:
+                 lines.append(f"    Observación: {observation}")
+diff --git a/main_window.py b/main_window.py
+index 223194fb41348238812b5c65d2d9922fedfac649..ec9bede5c9f799c8db51155164b34081b80f9af6 100644
+--- a/main_window.py
++++ b/main_window.py
+@@ -3101,57 +3212,81 @@ class MainWindow(QMainWindow):
+             pdf.output(file_path)
+         except Exception as exc:
+             QMessageBox.warning(self, "Error", f"No se pudo guardar el PDF:\n{exc}")
+             return
+         if mark_as_emitted:
+             self.labdb.mark_order_emitted(order_id, emission_timestamp)
+         QMessageBox.information(self, "Informe emitido", f"Reporte guardado en:\n{file_path}")
+         self.populate_completed_orders()
+         self.output_text.clear()
+ 
+     def _render_order_pdf(self, pdf, info, emission_display):
+         pat = info["patient"]
+         ord_inf = info["order"]
+         results = info["results"]
+         context = {"patient": pat, "order": ord_inf}
+         doc_text = " ".join([part for part in (pat.get('doc_type'), pat.get('doc_number')) if part]) or "-"
+         patient_name = (pat.get('name') or '-').upper()
+         age_text = self._format_age_text(pat, ord_inf)
+         order_date_text = ord_inf.get('date') or "-"
+         sex_text = (pat.get('sex') or '-').upper()
+         hcl_text = (pat.get('hcl') or '-').upper()
+         origin_text = (pat.get('origin') or '-').upper()
+         requester_text = (ord_inf.get('requested_by') or '-').upper()
+         emission_state = "Emitido" if emission_display != "Pendiente de emisión" else "Por emitir"
+         header_image_path = os.path.join("img", "img.png")
++        pregnancy_flag = pat.get('is_pregnant')
++        gest_weeks = pat.get('gestational_age_weeks')
++        due_raw = pat.get('expected_delivery_date')
++        due_display = '-'
++        if due_raw:
++            due_display = self._format_short_date(due_raw)
++            if due_display == '—':
++                due_display = due_raw
++        pregnancy_text = None
++        if pregnancy_flag or due_raw or gest_weeks not in (None, ''):
++            if pregnancy_flag:
++                weeks_text = ''
++                if gest_weeks not in (None, '', 0):
++                    try:
++                        weeks_text = f"{int(gest_weeks)} sem"
++                    except (TypeError, ValueError):
++                        weeks_text = ''
++                pregnancy_text = 'Sí'
++                if weeks_text:
++                    pregnancy_text = f"{pregnancy_text} ({weeks_text})"
++            else:
++                pregnancy_text = 'No'
+         info_pairs = [
+             (("Paciente", patient_name), ("Edad", age_text)),
+             (("Documento", doc_text.upper() if doc_text else "-"), ("Sexo", sex_text)),
+             (("Historia clínica", hcl_text), ("Estado de emisión", emission_state)),
+             (("Procedencia", origin_text), ("Fecha del informe", emission_display)),
+             (("Solicitante", requester_text), ("Fecha de registro", order_date_text)),
+         ]
++        if pregnancy_text:
++            info_pairs.append((("Gestante", pregnancy_text), ("FPP", due_display)))
+ 
+         def draw_patient_info():
+             col_width = (pdf.w - pdf.l_margin - pdf.r_margin) / 2
+ 
+             def wrap_value_lines(text, width):
+                 safe_value = str(text) if text not in (None, "") else "-"
+                 safe_value = self._ensure_latin1(safe_value)
+                 segments = []
+                 for part in safe_value.split('\n'):
+                     part = part.strip()
+                     if part:
+                         segments.append(part)
+                 if not segments:
+                     segments = [safe_value.strip() or "-"]
+                 lines = []
+                 for segment in segments:
+                     words = segment.split()
+                     if not words:
+                         lines.append("-")
+                         continue
+                     current = words[0]
+                     for word in words[1:]:
+                         candidate = f"{current} {word}"
+                         if pdf.get_string_width(candidate) <= max(width, 1):
+                             current = candidate

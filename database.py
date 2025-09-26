@@ -36,6 +36,9 @@ class LabDB:
                 height REAL,
                 weight REAL,
                 blood_pressure TEXT,
+                is_pregnant INTEGER DEFAULT 0,
+                gestational_age_weeks INTEGER,
+                expected_delivery_date TEXT,
                 UNIQUE(doc_type, doc_number)
             )
         """)
@@ -72,6 +75,9 @@ class LabDB:
         self._ensure_column_exists("orders", "deleted_reason", "TEXT")
         self._ensure_column_exists("orders", "deleted_by", "INTEGER")
         self._ensure_column_exists("orders", "deleted_at", "TEXT")
+        self._ensure_column_exists("patients", "is_pregnant", "INTEGER", default_value="0")
+        self._ensure_column_exists("patients", "gestational_age_weeks", "INTEGER")
+        self._ensure_column_exists("patients", "expected_delivery_date", "TEXT")
         self.cur.execute("""
             CREATE TABLE IF NOT EXISTS order_tests (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -200,25 +206,96 @@ class LabDB:
     def find_patient(self, doc_type, doc_number):
         self.cur.execute("SELECT * FROM patients WHERE doc_type=? AND doc_number=?", (doc_type, doc_number))
         return self.cur.fetchone()
-    def add_or_update_patient(self, doc_type, doc_number, first_name, last_name, birth_date, sex, origin, hcl, height, weight, blood_pressure):
+    def add_or_update_patient(
+        self,
+        doc_type,
+        doc_number,
+        first_name,
+        last_name,
+        birth_date,
+        sex,
+        origin,
+        hcl,
+        height,
+        weight,
+        blood_pressure,
+        is_pregnant=False,
+        gestational_age_weeks=None,
+        expected_delivery_date=None
+    ):
         first_name = first_name.upper() if first_name else first_name
         last_name = last_name.upper() if last_name else last_name
         existing = self.find_patient(doc_type, doc_number)
+        preg_flag = 1 if is_pregnant else 0
+        gest_age = None
+        if gestational_age_weeks is not None:
+            try:
+                gest_age = int(gestational_age_weeks)
+            except (TypeError, ValueError):
+                gest_age = None
+        delivery_date = expected_delivery_date if expected_delivery_date else None
         if existing:
             pid = existing[0]
             self.cur.execute("""
-                UPDATE patients SET first_name=?, last_name=?, birth_date=?, sex=?, origin=?, hcl=?, height=?, weight=?, blood_pressure=?
+                UPDATE patients
+                SET first_name=?, last_name=?, birth_date=?, sex=?, origin=?, hcl=?, height=?, weight=?, blood_pressure=?,
+                    is_pregnant=?, gestational_age_weeks=?, expected_delivery_date=?
                 WHERE id=?
-            """, (first_name, last_name, birth_date, sex, origin, hcl, height, weight, blood_pressure, pid))
+            """, (
+                first_name,
+                last_name,
+                birth_date,
+                sex,
+                origin,
+                hcl,
+                height,
+                weight,
+                blood_pressure,
+                preg_flag,
+                gest_age,
+                delivery_date,
+                pid
+            ))
             self.conn.commit()
             return pid
         else:
             self.cur.execute("""
-                INSERT INTO patients(doc_type, doc_number, first_name, last_name, birth_date, sex, origin, hcl, height, weight, blood_pressure)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?)
-            """, (doc_type, doc_number, first_name, last_name, birth_date, sex, origin, hcl, height, weight, blood_pressure))
+                INSERT INTO patients(
+                    doc_type,
+                    doc_number,
+                    first_name,
+                    last_name,
+                    birth_date,
+                    sex,
+                    origin,
+                    hcl,
+                    height,
+                    weight,
+                    blood_pressure,
+                    is_pregnant,
+                    gestational_age_weeks,
+                    expected_delivery_date
+                )
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """, (
+                doc_type,
+                doc_number,
+                first_name,
+                last_name,
+                birth_date,
+                sex,
+                origin,
+                hcl,
+                height,
+                weight,
+                blood_pressure,
+                preg_flag,
+                gest_age,
+                delivery_date
+            ))
             self.conn.commit()
             return self.cur.lastrowid
+
     def add_order_with_tests(
         self,
         patient_id,
@@ -377,6 +454,7 @@ class LabDB:
     def get_order_details(self, order_id):
         self.cur.execute("""
             SELECT p.first_name, p.last_name, p.doc_type, p.doc_number, p.birth_date, p.sex, p.origin, p.hcl,
+                   p.is_pregnant, p.gestational_age_weeks, p.expected_delivery_date,
                    o.date, o.sample_date, o.observations, o.requested_by, o.diagnosis, o.age_years, o.emitted, o.emitted_at
             FROM orders o
             JOIN patients p ON o.patient_id = p.id
@@ -386,6 +464,7 @@ class LabDB:
         if not header:
             return None
         (first_name, last_name, doc_type, doc_number, birth_date, sex, origin, hcl,
+         is_pregnant, gest_age_weeks, expected_delivery,
          date, sample_date, obs, req_by, diag, age_years, emitted, emitted_at) = header
         patient_info = {
             "name": f"{(first_name or '').upper()} {(last_name or '').upper()}".strip(),
@@ -394,7 +473,10 @@ class LabDB:
             "birth_date": birth_date,
             "sex": sex,
             "origin": origin,
-            "hcl": hcl
+            "hcl": hcl,
+            "is_pregnant": bool(is_pregnant) if is_pregnant not in (None, "") else False,
+            "gestational_age_weeks": gest_age_weeks,
+            "expected_delivery_date": expected_delivery
         }
         order_info = {
             "date": date,
@@ -407,10 +489,11 @@ class LabDB:
             "emitted_at": emitted_at,
         }
         self.cur.execute("""
-            SELECT t.name, ot.result, t.category
+            SELECT t.name, ot.result, t.category, ot.sample_status, ot.sample_issue, ot.observation, ot.id
             FROM order_tests ot
             JOIN tests t ON ot.test_id = t.id
             WHERE ot.order_id = ?
+              AND (ot.deleted IS NULL OR ot.deleted=0)
             ORDER BY ot.id ASC
         """, (order_id,))
         results = self.cur.fetchall()
