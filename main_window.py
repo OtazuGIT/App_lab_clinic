@@ -10,7 +10,7 @@ from PyQt5.QtWidgets import (QMainWindow, QWidget, QLabel, QPushButton, QVBoxLay
                              QStackedWidget, QFormLayout, QScrollArea, QGroupBox, QComboBox,
                              QLineEdit, QTextEdit, QTableWidget, QTableWidgetItem, QFileDialog, QMessageBox, QCheckBox,
                              QDateEdit, QRadioButton, QButtonGroup, QDialog, QDialogButtonBox, QListWidget, QListWidgetItem,
-                             QSpinBox)
+                             QSpinBox, QInputDialog)
 from PyQt5.QtCore import QDate, QDateTime, Qt, QTimer
 from fpdf import FPDF  # Asegúrese de tener fpdf instalado (pip install fpdf)
 
@@ -1268,11 +1268,16 @@ class MainWindow(QMainWindow):
         self.sex_group.addButton(self.sex_male_radio)
         self.sex_group.addButton(self.sex_female_radio)
         self.sex_male_radio.setChecked(True)
+        self.sex_male_radio.toggled.connect(self.update_pregnancy_visibility)
+        self.sex_female_radio.toggled.connect(self.update_pregnancy_visibility)
         sex_layout = QHBoxLayout()
         sex_layout.addWidget(self.sex_male_radio)
         sex_layout.addWidget(self.sex_female_radio)
         sex_layout.addStretch()
         form_layout.addRow("Sexo:", sex_layout)
+        self.insurance_combo = QComboBox()
+        self.insurance_combo.addItems(["SIS", "Particular"])
+        form_layout.addRow("Tipo de seguro:", self.insurance_combo)
         self.pregnancy_checkbox = QCheckBox("Paciente gestante")
         self.pregnancy_checkbox.stateChanged.connect(self.on_pregnancy_toggle)
         self.gestational_weeks_spin = QSpinBox()
@@ -1283,7 +1288,9 @@ class MainWindow(QMainWindow):
         self.expected_delivery_date.setDisplayFormat("dd-MM-yyyy")
         self.expected_delivery_date.setCalendarPopup(True)
         self.expected_delivery_date.setEnabled(False)
-        pregnancy_layout = QHBoxLayout()
+        self.pregnancy_container = QWidget()
+        pregnancy_layout = QHBoxLayout(self.pregnancy_container)
+        pregnancy_layout.setContentsMargins(0, 0, 0, 0)
         pregnancy_layout.addWidget(self.pregnancy_checkbox)
         pregnancy_layout.addSpacing(8)
         pregnancy_layout.addWidget(QLabel("Edad gestacional:"))
@@ -1292,7 +1299,8 @@ class MainWindow(QMainWindow):
         pregnancy_layout.addWidget(QLabel("FPP:"))
         pregnancy_layout.addWidget(self.expected_delivery_date)
         pregnancy_layout.addStretch()
-        form_layout.addRow("Gestación:", pregnancy_layout)
+        form_layout.addRow("Gestación:", self.pregnancy_container)
+        self.update_pregnancy_visibility()
         # Procedencia con opción rápida P.S Iñapari u otros
         self.origin_combo = QComboBox()
         self.origin_combo.addItems(["P.S Iñapari", "Otros"])
@@ -1436,6 +1444,21 @@ class MainWindow(QMainWindow):
             self.expected_delivery_date.setEnabled(is_checked)
             if not is_checked:
                 self.expected_delivery_date.setDate(QDate.currentDate())
+
+    def update_pregnancy_visibility(self):
+        is_female = self.sex_female_radio.isChecked() if hasattr(self, 'sex_female_radio') else False
+        if hasattr(self, 'pregnancy_container'):
+            self.pregnancy_container.setVisible(is_female)
+        if hasattr(self, 'pregnancy_checkbox'):
+            self.pregnancy_checkbox.setEnabled(is_female)
+            if not is_female:
+                self.pregnancy_checkbox.blockSignals(True)
+                self.pregnancy_checkbox.setChecked(False)
+                self.pregnancy_checkbox.blockSignals(False)
+                self.on_pregnancy_toggle(Qt.Unchecked)
+            else:
+                state = Qt.Checked if self.pregnancy_checkbox.isChecked() else Qt.Unchecked
+                self.on_pregnancy_toggle(state)
     def get_current_origin(self):
         if self.origin_combo.currentText() == "Otros":
             other = self.input_origin_other.text().strip()
@@ -1483,6 +1506,7 @@ class MainWindow(QMainWindow):
                 self.sex_female_radio.setChecked(True)
             else:
                 self.sex_male_radio.setChecked(True)
+            self.update_pregnancy_visibility()
             self.set_origin_value(origin or "")
             self.input_hcl.setText(hcl or "")
             self.input_height.setText(self._format_number(height))
@@ -1531,6 +1555,7 @@ class MainWindow(QMainWindow):
         self.input_last_name.setText(last_name)
         birth_date = self.input_birth_date.date().toString("yyyy-MM-dd")
         sex = "Femenino" if self.sex_female_radio.isChecked() else "Masculino"
+        insurance_type = self.insurance_combo.currentText() if hasattr(self, 'insurance_combo') else "SIS"
         origin = self.get_current_origin()
         if self.origin_combo.currentText() == "Otros" and (not self.input_origin_other.text().strip()):
             QMessageBox.warning(self, "Procedencia requerida", "Indique la procedencia del paciente cuando seleccione 'Otros'.")
@@ -1622,6 +1647,7 @@ class MainWindow(QMainWindow):
             observations=observations,
             requested_by=requested_by_text,
             diagnosis=diagnosis,
+            insurance_type=insurance_type,
             age_years=age_years,
             sample_date=sample_date
         )
@@ -1639,6 +1665,8 @@ class MainWindow(QMainWindow):
         self.input_birth_date.blockSignals(False)
         self.input_age.clear()
         self.sex_male_radio.setChecked(True)
+        if hasattr(self, 'insurance_combo'):
+            self.insurance_combo.setCurrentIndex(0)
         self.set_origin_value("P.S Iñapari")
         self.input_hcl.clear()
         self.input_height.clear(); self.input_weight.clear(); self.input_blood_pressure.clear()
@@ -1665,6 +1693,7 @@ class MainWindow(QMainWindow):
             self.input_requested_by.lineEdit().clear()
         for cb in getattr(self, 'test_checkboxes', []):
             cb.setChecked(False)
+        self.update_pregnancy_visibility()
 
     def go_to_results(self):
         # Navegar a la página de resultados para la última orden registrada
@@ -1699,11 +1728,14 @@ class MainWindow(QMainWindow):
         self.combo_orders = QComboBox()
         self.combo_orders.setMinimumWidth(350)
         btn_load = QPushButton("Cargar")
+        self.results_add_tests_btn = QPushButton("Agregar pruebas")
+        self.results_add_tests_btn.setEnabled(False)
         btn_delete_order = QPushButton("Eliminar orden")
         btn_delete_order.setStyleSheet("color: #c0392b;")
         top_layout.addWidget(lbl)
         top_layout.addWidget(self.combo_orders)
         top_layout.addWidget(btn_load)
+        top_layout.addWidget(self.results_add_tests_btn)
         top_layout.addWidget(btn_delete_order)
         layout.addLayout(top_layout)
         # Área scrollable para campos de resultados
@@ -1720,6 +1752,7 @@ class MainWindow(QMainWindow):
         btn_load.clicked.connect(self.load_order_fields)
         btn_save.clicked.connect(self.save_results)
         btn_delete_order.clicked.connect(self.delete_order_from_results)
+        self.results_add_tests_btn.clicked.connect(self.add_tests_to_selected_order)
         self.order_search_input.textChanged.connect(self.filter_pending_orders)
         self.pending_sort_combo.currentIndexChanged.connect(
             lambda: self.filter_pending_orders(self.order_search_input.text(), prefer_order=self.selected_order_id)
@@ -1871,6 +1904,8 @@ class MainWindow(QMainWindow):
         # Cargar campos de resultado para la orden seleccionada
         self._clear_results_layout()
         self.order_fields.clear()
+        if hasattr(self, 'results_add_tests_btn'):
+            self.results_add_tests_btn.setEnabled(False)
         data = self.combo_orders.currentData() if hasattr(self, 'combo_orders') else None
         if data is None:
             self.selected_order_id = None
@@ -1902,6 +1937,8 @@ class MainWindow(QMainWindow):
             self.results_layout.addWidget(empty_label)
             self.results_layout.addStretch()
             return
+        if hasattr(self, 'results_add_tests_btn'):
+            self.results_add_tests_btn.setEnabled(True)
         order_test_names = [name for (name, *_rest) in rows]
         for entry in rows:
             (
@@ -2158,6 +2195,8 @@ class MainWindow(QMainWindow):
             widget = item.widget()
             if widget:
                 widget.deleteLater()
+        if hasattr(self, 'results_add_tests_btn'):
+            self.results_add_tests_btn.setEnabled(False)
     def _create_structured_field(self, field_def, existing_values, context=None):
         key = field_def.get("key")
         value = ""
@@ -2706,10 +2745,14 @@ class MainWindow(QMainWindow):
                     "doc_number": record.get("doc_number"),
                     "birth_date": record.get("birth_date"),
                     "hcl": record.get("hcl"),
+                    "sex": record.get("sex"),
+                    "origin": record.get("origin"),
                     "age": record.get("age", ""),
                     "first_name": record.get("first_name"),
                     "last_name": record.get("last_name"),
                     "observations": record.get("order_observations"),
+                    "insurance_type": record.get("insurance_type"),
+                    "fua_number": record.get("fua_number"),
                     "emitted": record.get("emitted"),
                     "emitted_at": record.get("emitted_at"),
                     "groups": {key: [] for key in group_keys},
@@ -2801,6 +2844,41 @@ class MainWindow(QMainWindow):
         if emitted_flag == 0:
             return "No"
         return "-"
+
+    def _format_birth_for_history(self, birth_value):
+        if not birth_value:
+            return "-"
+        display = self._format_short_date(birth_value)
+        return "-" if display == "—" else display
+
+    def _format_sex_display(self, sex_value):
+        if sex_value in (None, ""):
+            return "-"
+        text = str(sex_value).strip()
+        if not text:
+            return "-"
+        normalized = text.lower()
+        if normalized.startswith("f"):
+            return "F"
+        if normalized.startswith("m"):
+            return "M"
+        return text.title()
+
+    def _format_insurance_display(self, insurance_value):
+        if not insurance_value:
+            return "SIS"
+        return str(insurance_value).strip().upper() or "SIS"
+
+    def _format_fua_display(self, entry):
+        insurance = (entry.get("insurance_type") or "").strip().lower()
+        fua_value = entry.get("fua_number")
+        if insurance == "particular":
+            return "No aplica"
+        if isinstance(fua_value, str):
+            fua_value = fua_value.strip()
+        if fua_value:
+            return str(fua_value)
+        return "Pendiente"
 
     def _format_sample_status_text(self, status_value, note):
         value = (status_value or "recibida").strip().lower()
@@ -3152,11 +3230,25 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Sin cambios", "No se pudo eliminar la orden seleccionada.")
 
     def add_tests_to_selected_order(self):
-        data = self.combo_completed.currentData() if hasattr(self, 'combo_completed') else None
-        if data is None:
-            QMessageBox.information(self, "Sin selección", "Seleccione una orden para agregar pruebas adicionales.")
-            return
-        order_id = int(data)
+        sender = self.sender()
+        triggered_from_results = sender == getattr(self, 'results_add_tests_btn', None)
+        order_id = None
+        if triggered_from_results:
+            if self.selected_order_id:
+                order_id = int(self.selected_order_id)
+            elif hasattr(self, 'combo_orders'):
+                data = self.combo_orders.currentData()
+                if data is not None:
+                    order_id = int(data)
+            if not order_id:
+                QMessageBox.information(self, "Sin selección", "Cargue una orden pendiente antes de agregar pruebas.")
+                return
+        else:
+            data = self.combo_completed.currentData() if hasattr(self, 'combo_completed') else None
+            if data is None:
+                QMessageBox.information(self, "Sin selección", "Seleccione una orden para agregar pruebas adicionales.")
+                return
+            order_id = int(data)
         all_tests = self.labdb.get_all_tests()
         existing = self.labdb.get_tests_for_order(order_id)
         dialog = AddTestsDialog(all_tests, existing, self)
@@ -3170,25 +3262,35 @@ class MainWindow(QMainWindow):
         if not added:
             QMessageBox.information(self, "Sin cambios", "Las pruebas seleccionadas ya estaban asociadas a la orden.")
             return
-        QMessageBox.information(
-            self,
-            "Pruebas agregadas",
-            "Se agregaron {0} prueba(s). Registre los resultados antes de emitir nuevamente.".format(len(added))
-        )
-        self.selected_order_id = order_id
-        self.populate_pending_orders()
-        self.populate_completed_orders()
-        reply = QMessageBox.question(
-            self,
-            "Registrar resultados",
-            "¿Desea ir a la pantalla de resultados para completar las nuevas pruebas?",
-            QMessageBox.Yes | QMessageBox.No
-        )
-        if reply == QMessageBox.Yes:
-            self.stack.setCurrentWidget(self.page_resultados)
-            if hasattr(self, 'combo_orders'):
-                self._select_order_in_combo(self.combo_orders, order_id)
+        if triggered_from_results:
+            QMessageBox.information(
+                self,
+                "Pruebas agregadas",
+                "Se agregaron {0} prueba(s). Las nuevas pruebas aparecerán en el formulario.".format(len(added))
+            )
+            self.selected_order_id = order_id
+            self.populate_pending_orders()
             self.load_order_fields()
+        else:
+            QMessageBox.information(
+                self,
+                "Pruebas agregadas",
+                "Se agregaron {0} prueba(s). Registre los resultados antes de emitir nuevamente.".format(len(added))
+            )
+            self.selected_order_id = order_id
+            self.populate_pending_orders()
+            self.populate_completed_orders()
+            reply = QMessageBox.question(
+                self,
+                "Registrar resultados",
+                "¿Desea ir a la pantalla de resultados para completar las nuevas pruebas?",
+                QMessageBox.Yes | QMessageBox.No
+            )
+            if reply == QMessageBox.Yes:
+                self.stack.setCurrentWidget(self.page_resultados)
+                if hasattr(self, 'combo_orders'):
+                    self._select_order_in_combo(self.combo_orders, order_id)
+                self.load_order_fields()
 
     def display_selected_result(self):
         # Mostrar los resultados de la orden seleccionada en el cuadro de texto
@@ -3232,6 +3334,13 @@ class MainWindow(QMainWindow):
                 lines.append(f"FPP: {due_display}")
         lines.append(f"HISTORIA CLÍNICA: {pat.get('hcl') or '-'}")
         lines.append(f"PROCEDENCIA: {pat.get('origin') or '-'}")
+        insurance_display = self._format_insurance_display(ord_inf.get('insurance_type'))
+        fua_display = self._format_fua_display({
+            "insurance_type": ord_inf.get('insurance_type'),
+            "fua_number": ord_inf.get('fua_number')
+        })
+        lines.append(f"SEGURO: {insurance_display}")
+        lines.append(f"FUA: {fua_display}")
         requester = ord_inf.get('requested_by') or '-'
         lines.append(f"SOLICITANTE: {requester}")
         emission_raw = ord_inf.get('emitted_at')
@@ -3390,9 +3499,15 @@ class MainWindow(QMainWindow):
                 sample_date_display = sample_date_raw
         if not print_display:
             print_display = emission_display
+        insurance_display = self._format_insurance_display(ord_inf.get('insurance_type'))
+        fua_display = self._format_fua_display({
+            "insurance_type": ord_inf.get('insurance_type'),
+            "fua_number": ord_inf.get('fua_number')
+        })
         info_pairs = [
             (("Paciente", patient_name), ("Edad", age_text)),
             (("Documento", doc_text.upper() if doc_text else "-"), ("Sexo", sex_text)),
+            (("Seguro", insurance_display), ("FUA", fua_display)),
             (("Historia clínica", hcl_text), ("Fecha del informe", emission_display)),
             (("Procedencia", origin_text), ("Fecha de toma de muestra", sample_date_display)),
             (("Solicitante", requester_text), ("Diagnóstico", diagnosis_text)),
@@ -3874,6 +3989,9 @@ class MainWindow(QMainWindow):
         self.history_open_btn = QPushButton("Ver en emisión")
         self.history_open_btn.setEnabled(False)
         history_search_layout.addWidget(self.history_open_btn)
+        self.history_fua_btn = QPushButton("Registrar FUA")
+        self.history_fua_btn.setEnabled(False)
+        history_search_layout.addWidget(self.history_fua_btn)
         history_search_layout.addStretch()
         history_layout.addLayout(history_search_layout)
         history_headers = [
@@ -3881,7 +3999,13 @@ class MainWindow(QMainWindow):
             "Orden",
             "Paciente",
             "Documento",
+            "F. Nacimiento",
             "Edad",
+            "Sexo",
+            "Procedencia",
+            "HCL",
+            "Tipo de seguro",
+            "FUA",
             "Hematología",
             "Bioquímica",
             "Micro/Parasitología",
@@ -3896,6 +4020,7 @@ class MainWindow(QMainWindow):
         self.history_table.setWordWrap(True)
         self.history_table.verticalHeader().setVisible(False)
         self.history_table.horizontalHeader().setStretchLastSection(True)
+        self.history_column_map = {header: idx for idx, header in enumerate(history_headers)}
         history_layout.addWidget(self.history_table)
         layout.addWidget(history_group)
         self._history_results = []
@@ -3909,6 +4034,7 @@ class MainWindow(QMainWindow):
         self.history_search_btn.clicked.connect(self.search_patient_history)
         self.history_open_btn.clicked.connect(self.open_history_order_from_analysis)
         self.history_table.itemSelectionChanged.connect(self._on_history_selection_changed)
+        self.history_fua_btn.clicked.connect(self.edit_history_fua)
     def refresh_statistics(self):
         stats = self.labdb.get_statistics()
         text = (f"Pacientes registrados: {stats['total_patients']}\n"
@@ -4002,8 +4128,11 @@ class MainWindow(QMainWindow):
             sex,
             birth_date,
             hcl,
+            origin,
             age_years,
             order_obs,
+            insurance_type,
+            fua_number,
             test_name,
             category,
             result,
@@ -4047,12 +4176,16 @@ class MainWindow(QMainWindow):
                 "doc_number": doc_number,
                 "birth_date": birth_date,
                 "hcl": hcl,
+                "sex": sex,
+                "origin": origin,
                 "age": age_display,
                 "test": test_name,
                 "result": result_text,
                 "summary_items": summary_items,
                 "category": category,
                 "order_observations": order_obs,
+                "insurance_type": insurance_type,
+                "fua_number": fua_number,
                 "emitted": None,
                 "emitted_at": None,
                 "first_name": first,
@@ -4493,6 +4626,23 @@ class MainWindow(QMainWindow):
         has_selection = bool(selection.selectedRows()) if selection else False
         if hasattr(self, 'history_open_btn'):
             self.history_open_btn.setEnabled(has_selection)
+        if hasattr(self, 'history_fua_btn'):
+            enable_fua = False
+            tooltip = ""
+            if has_selection and selection:
+                indexes = selection.selectedRows()
+                if indexes:
+                    row = indexes[0].row()
+                    history_items = getattr(self, '_history_results', [])
+                    if 0 <= row < len(history_items):
+                        entry = history_items[row]
+                        insurance = (entry.get("insurance_type") or "").strip().lower()
+                        if insurance == "particular":
+                            tooltip = "Las atenciones particulares no requieren FUA."
+                        else:
+                            enable_fua = True
+            self.history_fua_btn.setEnabled(enable_fua)
+            self.history_fua_btn.setToolTip(tooltip)
 
 
     def search_patient_history(self):
@@ -4523,8 +4673,11 @@ class MainWindow(QMainWindow):
                 sex,
                 birth_date,
                 hcl,
+                origin,
                 age_years,
                 order_obs,
+                insurance_type,
+                fua_number,
                 emitted,
                 emitted_at,
                 sample_status,
@@ -4568,12 +4721,16 @@ class MainWindow(QMainWindow):
                 "doc_number": doc_value,
                 "birth_date": birth_date,
                 "hcl": hcl,
+                "sex": sex,
+                "origin": origin,
                 "age": age_display,
                 "test": test_name,
                 "result": result_text,
                 "summary_items": summary_items,
                 "category": category,
                 "order_observations": order_obs,
+                "insurance_type": insurance_type,
+                "fua_number": fua_number,
                 "emitted": emitted,
                 "emitted_at": emitted_at,
                 "first_name": first_name,
@@ -4590,7 +4747,13 @@ class MainWindow(QMainWindow):
             "order_id",
             "patient",
             "document",
+            "birth",
             "age",
+            "sex",
+            "origin",
+            "hcl",
+            "insurance",
+            "fua",
             "hematology",
             "biochemistry",
             "micro_parasito",
@@ -4603,7 +4766,13 @@ class MainWindow(QMainWindow):
                 str(entry.get("order_id", "-")),
                 entry.get("patient", "-"),
                 entry.get("document", "-"),
+                self._format_birth_for_history(entry.get("birth_date")),
                 entry.get("age", "-"),
+                self._format_sex_display(entry.get("sex")),
+                entry.get("origin", "-") or "-",
+                entry.get("hcl", "-") or "-",
+                self._format_insurance_display(entry.get("insurance_type")),
+                self._format_fua_display(entry),
                 "\n  ".join(entry.get("groups", {}).get("hematology", [])) or "-",
                 "\n  ".join(entry.get("groups", {}).get("biochemistry", [])) or "-",
                 "\n  ".join(entry.get("groups", {}).get("micro_parasito", [])) or "-",
@@ -4612,7 +4781,7 @@ class MainWindow(QMainWindow):
             ]
             for col_idx, value in enumerate(values):
                 item = QTableWidgetItem(str(value))
-                if headers[col_idx] in {"order_id", "age"}:
+                if headers[col_idx] in {"order_id", "age", "birth", "sex", "insurance", "fua"}:
                     item.setTextAlignment(Qt.AlignCenter)
                 self.history_table.setItem(row_idx, col_idx, item)
         if not aggregated:
@@ -4643,6 +4812,51 @@ class MainWindow(QMainWindow):
         self._select_order_in_combo(self.combo_completed, order_id)
         self.display_selected_result()
         self.stack.setCurrentWidget(self.page_emitir)
+
+    def edit_history_fua(self):
+        if not hasattr(self, 'history_table'):
+            return
+        selection = self.history_table.selectionModel()
+        if not selection or not selection.selectedRows():
+            QMessageBox.information(self, "Sin selección", "Seleccione una orden para registrar su FUA.")
+            return
+        row = selection.selectedRows()[0].row()
+        history_items = getattr(self, '_history_results', [])
+        if row >= len(history_items):
+            return
+        entry = history_items[row]
+        insurance = (entry.get("insurance_type") or "").strip().lower()
+        if insurance == "particular":
+            QMessageBox.information(self, "FUA no requerido", "Esta atención es Particular, no requiere FUA.")
+            return
+        order_id = entry.get("order_id")
+        if not order_id:
+            QMessageBox.warning(self, "Orden no disponible", "No se pudo identificar la orden seleccionada.")
+            return
+        current_value = entry.get("fua_number") or ""
+        text, ok = QInputDialog.getText(
+            self,
+            "Registrar FUA",
+            f"Ingrese el número de FUA para la orden #{order_id}:",
+            QLineEdit.Normal,
+            current_value
+        )
+        if not ok:
+            return
+        new_value = text.strip()
+        updated = self.labdb.update_order_fua(order_id, new_value)
+        if not updated:
+            QMessageBox.warning(self, "Sin cambios", "No se pudo actualizar el número de FUA.")
+            return
+        entry["fua_number"] = new_value
+        fua_text = self._format_fua_display(entry)
+        fua_col = getattr(self, 'history_column_map', {}).get("FUA") if hasattr(self, 'history_column_map') else None
+        if fua_col is not None:
+            item = QTableWidgetItem(fua_text)
+            item.setTextAlignment(Qt.AlignCenter)
+            self.history_table.setItem(row, fua_col, item)
+        QMessageBox.information(self, "FUA actualizado", "El número de FUA se registró correctamente.")
+        self._on_history_selection_changed()
     def init_config_page(self):
         layout = QVBoxLayout(self.page_config)
         profile_group = QGroupBox("Datos del usuario actual")

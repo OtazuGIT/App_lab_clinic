@@ -1,0 +1,376 @@
+diff --git a/database.py b/database.py
+index 642c4840b922568d51c5ce14e9c48331c6438629..b9ae2e6e7a2ba2ddac90c46459c859bec641d6e4 100644
+--- a/database.py
++++ b/database.py
+@@ -40,58 +40,62 @@ class LabDB:
+                 weight REAL,
+                 blood_pressure TEXT,
+                 is_pregnant INTEGER DEFAULT 0,
+                 gestational_age_weeks INTEGER,
+                 expected_delivery_date TEXT,
+                 UNIQUE(doc_type, doc_number)
+             )
+         """)
+         self.cur.execute("""
+             CREATE TABLE IF NOT EXISTS tests (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 name TEXT,
+                 category TEXT
+             )
+         """)
+         self.cur.execute("""
+             CREATE TABLE IF NOT EXISTS orders (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 patient_id INTEGER,
+                 date TEXT,
+                 sample_date TEXT,
+                 created_by INTEGER,
+                 observations TEXT,
+                 requested_by TEXT,
+                 diagnosis TEXT,
++                insurance_type TEXT DEFAULT 'SIS',
++                fua_number TEXT,
+                 age_years INTEGER,
+                 completed INTEGER DEFAULT 0,
+                 FOREIGN KEY(patient_id) REFERENCES patients(id),
+                 FOREIGN KEY(created_by) REFERENCES users(id)
+             )
+         """)
+         # Asegurarse de que columnas nuevas existan para bases de datos creadas anteriormente
+         self._ensure_column_exists("orders", "diagnosis", "TEXT", default_value="")
++        self._ensure_column_exists("orders", "insurance_type", "TEXT", default_value="SIS")
++        self._ensure_column_exists("orders", "fua_number", "TEXT")
+         self._ensure_column_exists("orders", "age_years", "INTEGER")
+         self._ensure_column_exists("orders", "sample_date", "TEXT")
+         self._ensure_column_exists("orders", "emitted", "INTEGER", default_value="0")
+         self._ensure_column_exists("orders", "emitted_at", "TEXT")
+         self._ensure_column_exists("orders", "deleted", "INTEGER", default_value="0")
+         self._ensure_column_exists("orders", "deleted_reason", "TEXT")
+         self._ensure_column_exists("orders", "deleted_by", "INTEGER")
+         self._ensure_column_exists("orders", "deleted_at", "TEXT")
+         self._ensure_column_exists("patients", "is_pregnant", "INTEGER", default_value="0")
+         self._ensure_column_exists("patients", "gestational_age_weeks", "INTEGER")
+         self._ensure_column_exists("patients", "expected_delivery_date", "TEXT")
+         self.cur.execute("""
+             CREATE TABLE IF NOT EXISTS order_tests (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 order_id INTEGER,
+                 test_id INTEGER,
+                 result TEXT,
+                 sample_status TEXT DEFAULT 'recibida',
+                 sample_issue TEXT,
+                 observation TEXT,
+                 deleted INTEGER DEFAULT 0,
+                 deleted_reason TEXT,
+                 deleted_by INTEGER,
+                 deleted_at TEXT,
+                 FOREIGN KEY(order_id) REFERENCES orders(id),
+diff --git a/database.py b/database.py
+index 642c4840b922568d51c5ce14e9c48331c6438629..b9ae2e6e7a2ba2ddac90c46459c859bec641d6e4 100644
+--- a/database.py
++++ b/database.py
+@@ -332,68 +336,74 @@ class LabDB:
+                 doc_number,
+                 first_name,
+                 last_name,
+                 birth_date,
+                 sex,
+                 origin,
+                 hcl,
+                 height,
+                 weight,
+                 blood_pressure,
+                 preg_flag,
+                 gest_age,
+                 delivery_date
+             ))
+             self.conn.commit()
+             return self.cur.lastrowid
+ 
+     def add_order_with_tests(
+         self,
+         patient_id,
+         test_names,
+         user_id,
+         observations="",
+         requested_by="",
+         diagnosis="",
++        insurance_type="SIS",
++        fua_number=None,
+         age_years=None,
+         sample_date=None
+     ):
+         import datetime
+         date_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+         sample_date_str = None
+         if sample_date:
+             sample_date_str = str(sample_date)
+         age_value = None
+         if age_years is not None:
+             try:
+                 age_value = int(age_years)
+             except (TypeError, ValueError):
+                 age_value = None
++        insurance_value = (insurance_type or "SIS").strip() or "SIS"
++        fua_value = fua_number.strip() if isinstance(fua_number, str) else fua_number
++        if isinstance(fua_value, str) and fua_value == "":
++            fua_value = None
+         self.cur.execute("""
+-            INSERT INTO orders(patient_id, date, sample_date, created_by, observations, requested_by, diagnosis, age_years, completed)
+-            VALUES (?,?,?,?,?,?,?,?,?)
+-        """, (patient_id, date_str, sample_date_str, user_id, observations, requested_by, diagnosis, age_value, 0))
++            INSERT INTO orders(patient_id, date, sample_date, created_by, observations, requested_by, diagnosis, insurance_type, fua_number, age_years, completed)
++            VALUES (?,?,?,?,?,?,?,?,?,?,?)
++        """, (patient_id, date_str, sample_date_str, user_id, observations, requested_by, diagnosis, insurance_value, fua_value, age_value, 0))
+         order_id = self.cur.lastrowid
+         for name in test_names:
+             if name in self.test_map:
+                 test_id = self.test_map[name]
+                 self.cur.execute("INSERT INTO order_tests(order_id, test_id, result) VALUES (?,?,?)",
+                                  (order_id, test_id, ""))
+         self.conn.commit()
+         return order_id
+     def find_recent_duplicate_order(self, patient_id, test_names, within_minutes=10):
+         if not patient_id or not test_names:
+             return None
+         normalized_target = sorted(name.strip().lower() for name in test_names if name)
+         if not normalized_target:
+             return None
+         import datetime
+         threshold = datetime.datetime.now() - datetime.timedelta(minutes=within_minutes)
+         self.cur.execute(
+             """
+             SELECT id FROM orders
+             WHERE patient_id=?
+               AND datetime(date) >= datetime(?)
+               AND (deleted IS NULL OR deleted=0)
+             ORDER BY datetime(date) DESC, id DESC
+             """,
+             (patient_id, threshold.strftime("%Y-%m-%d %H:%M:%S"))
+diff --git a/database.py b/database.py
+index 642c4840b922568d51c5ce14e9c48331c6438629..b9ae2e6e7a2ba2ddac90c46459c859bec641d6e4 100644
+--- a/database.py
++++ b/database.py
+@@ -483,79 +493,81 @@ class LabDB:
+             ORDER BY o.date ASC, o.id ASC
+         """)
+         return self.cur.fetchall()
+     def get_completed_orders(self, include_emitted=False):
+         if include_emitted:
+             self.cur.execute("""
+                 SELECT o.id, p.first_name, p.last_name, o.date, p.doc_type, p.doc_number, o.emitted, o.emitted_at
+                 FROM orders o
+                 JOIN patients p ON o.patient_id=p.id
+                 WHERE o.completed=1
+                 ORDER BY o.date ASC, o.id ASC
+             """)
+         else:
+             self.cur.execute("""
+                 SELECT o.id, p.first_name, p.last_name, o.date, p.doc_type, p.doc_number, o.emitted, o.emitted_at
+                 FROM orders o
+                 JOIN patients p ON o.patient_id=p.id
+                 WHERE o.completed=1 AND (o.emitted IS NULL OR o.emitted=0)
+                 ORDER BY o.date ASC, o.id ASC
+             """)
+         return self.cur.fetchall()
+     def get_order_details(self, order_id):
+         self.cur.execute("""
+             SELECT p.first_name, p.last_name, p.doc_type, p.doc_number, p.birth_date, p.sex, p.origin, p.hcl,
+                    p.is_pregnant, p.gestational_age_weeks, p.expected_delivery_date,
+-                   o.date, o.sample_date, o.observations, o.requested_by, o.diagnosis, o.age_years, o.emitted, o.emitted_at
++                   o.date, o.sample_date, o.observations, o.requested_by, o.diagnosis, o.insurance_type, o.fua_number, o.age_years, o.emitted, o.emitted_at
+             FROM orders o
+             JOIN patients p ON o.patient_id = p.id
+             WHERE o.id = ?
+         """, (order_id,))
+         header = self.cur.fetchone()
+         if not header:
+             return None
+         (first_name, last_name, doc_type, doc_number, birth_date, sex, origin, hcl,
+          is_pregnant, gest_age_weeks, expected_delivery,
+-         date, sample_date, obs, req_by, diag, age_years, emitted, emitted_at) = header
++         date, sample_date, obs, req_by, diag, insurance_type, fua_number, age_years, emitted, emitted_at) = header
+         patient_info = {
+             "name": f"{(first_name or '').upper()} {(last_name or '').upper()}".strip(),
+             "doc_type": doc_type,
+             "doc_number": doc_number,
+             "birth_date": birth_date,
+             "sex": sex,
+             "origin": origin,
+             "hcl": hcl,
+             "is_pregnant": bool(is_pregnant) if is_pregnant not in (None, "") else False,
+             "gestational_age_weeks": gest_age_weeks,
+             "expected_delivery_date": expected_delivery
+         }
+         order_info = {
+             "date": date,
+             "sample_date": sample_date,
+             "observations": obs,
+             "requested_by": req_by,
+             "diagnosis": diag,
++            "insurance_type": insurance_type,
++            "fua_number": fua_number,
+             "age_years": age_years,
+             "emitted": emitted,
+             "emitted_at": emitted_at,
+         }
+         self.cur.execute("""
+             SELECT t.name, ot.result, t.category, ot.sample_status, ot.sample_issue, ot.observation, ot.id
+             FROM order_tests ot
+             JOIN tests t ON ot.test_id = t.id
+             WHERE ot.order_id = ?
+               AND (ot.deleted IS NULL OR ot.deleted=0)
+             ORDER BY ot.id ASC
+         """, (order_id,))
+         results = self.cur.fetchall()
+         return {"patient": patient_info, "order": order_info, "results": results}
+     def save_results(self, order_id, results_dict):
+         for name, payload in results_dict.items():
+             if name not in self.test_map:
+                 continue
+             tid = self.test_map[name]
+             result_value = payload
+             sample_status = None
+             sample_issue = None
+             observation = None
+             if isinstance(payload, dict) and "result" in payload:
+                 result_value = payload.get("result")
+diff --git a/database.py b/database.py
+index 642c4840b922568d51c5ce14e9c48331c6438629..b9ae2e6e7a2ba2ddac90c46459c859bec641d6e4 100644
+--- a/database.py
++++ b/database.py
+@@ -647,52 +659,52 @@ class LabDB:
+         self.cur.execute("SELECT COUNT(*) FROM patients"); stats["total_patients"] = self.cur.fetchone()[0]
+         self.cur.execute("SELECT COUNT(*) FROM orders WHERE (deleted IS NULL OR deleted=0)"); stats["total_orders"] = self.cur.fetchone()[0]
+         self.cur.execute("""
+             SELECT COUNT(*)
+             FROM order_tests ot
+             JOIN orders o ON ot.order_id = o.id
+             WHERE (ot.deleted IS NULL OR ot.deleted=0)
+               AND (o.deleted IS NULL OR o.deleted=0)
+         """)
+         stats["total_tests_conducted"] = self.cur.fetchone()[0]
+         self.cur.execute("""
+             SELECT t.category, COUNT(*)
+             FROM order_tests ot
+             JOIN tests t ON ot.test_id = t.id
+             JOIN orders o ON ot.order_id = o.id
+             WHERE (ot.deleted IS NULL OR ot.deleted=0)
+               AND (o.deleted IS NULL OR o.deleted=0)
+             GROUP BY t.category
+         """)
+         stats["by_category"] = self.cur.fetchall()
+         return stats
+     def get_results_in_range(self, start_datetime, end_datetime):
+         self.cur.execute(
+             """
+             SELECT ot.id, o.id, o.date, o.sample_date, p.first_name, p.last_name, p.doc_type, p.doc_number,
+-                   p.sex, p.birth_date, p.hcl, o.age_years, o.observations, t.name, t.category, ot.result,
+-                   ot.sample_status, ot.sample_issue, ot.observation
++                   p.sex, p.birth_date, p.hcl, p.origin, o.age_years, o.observations, o.insurance_type, o.fua_number,
++                   t.name, t.category, ot.result, ot.sample_status, ot.sample_issue, ot.observation
+             FROM order_tests ot
+             JOIN orders o ON ot.order_id = o.id
+             JOIN patients p ON o.patient_id = p.id
+             JOIN tests t ON ot.test_id = t.id
+             WHERE datetime(o.date) BETWEEN datetime(?) AND datetime(?)
+               AND (o.deleted IS NULL OR o.deleted=0)
+               AND (ot.deleted IS NULL OR ot.deleted=0)
+             ORDER BY datetime(o.date) ASC, o.id ASC, ot.id ASC
+             """,
+             (start_datetime, end_datetime)
+         )
+         return self.cur.fetchall()
+     def get_distinct_requesters(self):
+         self.cur.execute("SELECT DISTINCT requested_by FROM orders WHERE requested_by IS NOT NULL AND requested_by<>'' ORDER BY requested_by")
+         return [row[0] for row in self.cur.fetchall() if row[0]]
+     def _ensure_column_exists(self, table_name, column_name, column_type, default_value=None):
+         self.cur.execute(f"PRAGMA table_info({table_name})")
+         columns = [info[1] for info in self.cur.fetchall()]
+         if column_name not in columns:
+             alter_sql = f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}"
+             if default_value is not None:
+                 alter_sql += f" DEFAULT '{default_value}'"
+             self.cur.execute(alter_sql)
+             self.conn.commit()
+ 
+diff --git a/database.py b/database.py
+index 642c4840b922568d51c5ce14e9c48331c6438629..b9ae2e6e7a2ba2ddac90c46459c859bec641d6e4 100644
+--- a/database.py
++++ b/database.py
+@@ -714,58 +726,74 @@ class LabDB:
+         self.cur.execute("""
+             SELECT t.name FROM order_tests ot
+             JOIN tests t ON ot.test_id = t.id
+             WHERE ot.order_id=?
+         """, (order_id,))
+         existing = {row[0] for row in self.cur.fetchall()}
+         added = []
+         for name in test_names:
+             if name not in self.test_map:
+                 self.cur.execute("SELECT id FROM tests WHERE name=?", (name,))
+                 row = self.cur.fetchone()
+                 if row:
+                     self.test_map[name] = row[0]
+             if name in self.test_map and name not in existing:
+                 test_id = self.test_map[name]
+                 self.cur.execute(
+                     "INSERT INTO order_tests(order_id, test_id, result) VALUES (?,?,?)",
+                     (order_id, test_id, "")
+                 )
+                 added.append(name)
+         if added:
+             self.cur.execute("UPDATE orders SET completed=0 WHERE id=?", (order_id,))
+         self.conn.commit()
+         return added
+ 
++    def update_order_fua(self, order_id, fua_number):
++        if not order_id:
++            return False
++        value = fua_number.strip() if isinstance(fua_number, str) else fua_number
++        if isinstance(value, str) and value == "":
++            value = None
++        self.cur.execute("SELECT id FROM orders WHERE id=?", (order_id,))
++        if not self.cur.fetchone():
++            return False
++        self.cur.execute(
++            "UPDATE orders SET fua_number=? WHERE id=?",
++            (value, order_id)
++        )
++        self.conn.commit()
++        return True
++
+     def get_patient_history_by_document(self, doc_number, doc_type=None):
+         if not doc_number:
+             return []
+         params = [doc_number]
+         query = """
+             SELECT o.id, o.date, o.sample_date, t.name, ot.result, t.category,
+                    p.first_name, p.last_name, p.doc_type, p.doc_number,
+-                   p.sex, p.birth_date, p.hcl, o.age_years, o.observations, o.emitted, o.emitted_at,
++                   p.sex, p.birth_date, p.hcl, p.origin, o.age_years, o.observations, o.insurance_type, o.fua_number, o.emitted, o.emitted_at,
+                    ot.sample_status, ot.sample_issue, ot.observation, ot.id
+             FROM orders o
+             JOIN patients p ON o.patient_id = p.id
+             JOIN order_tests ot ON ot.order_id = o.id
+             JOIN tests t ON ot.test_id = t.id
+             WHERE p.doc_number = ? AND (o.deleted IS NULL OR o.deleted=0) AND (ot.deleted IS NULL OR ot.deleted=0)
+         """
+         if doc_type:
+             query += " AND p.doc_type = ?"
+             params.append(doc_type)
+         query += " ORDER BY datetime(o.date) DESC, o.id DESC, t.name ASC"
+         self.cur.execute(query, params)
+         return self.cur.fetchall()
+ 
+     def _ensure_test_renamed(self, old_name, new_name):
+         if old_name == new_name:
+             return
+         self.cur.execute("UPDATE tests SET name=? WHERE name=?", (new_name, old_name))
+         self.conn.commit()
+ 
+     def _ensure_test_exists(self, name, category):
+         self.cur.execute("SELECT id FROM tests WHERE name=?", (name,))
+         if not self.cur.fetchone():
+             self.cur.execute("INSERT INTO tests(name, category) VALUES (?,?)", (name, category))
+             self.conn.commit()

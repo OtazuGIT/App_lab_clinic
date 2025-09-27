@@ -62,6 +62,8 @@ class LabDB:
                 observations TEXT,
                 requested_by TEXT,
                 diagnosis TEXT,
+                insurance_type TEXT DEFAULT 'SIS',
+                fua_number TEXT,
                 age_years INTEGER,
                 completed INTEGER DEFAULT 0,
                 FOREIGN KEY(patient_id) REFERENCES patients(id),
@@ -70,6 +72,8 @@ class LabDB:
         """)
         # Asegurarse de que columnas nuevas existan para bases de datos creadas anteriormente
         self._ensure_column_exists("orders", "diagnosis", "TEXT", default_value="")
+        self._ensure_column_exists("orders", "insurance_type", "TEXT", default_value="SIS")
+        self._ensure_column_exists("orders", "fua_number", "TEXT")
         self._ensure_column_exists("orders", "age_years", "INTEGER")
         self._ensure_column_exists("orders", "sample_date", "TEXT")
         self._ensure_column_exists("orders", "emitted", "INTEGER", default_value="0")
@@ -354,6 +358,8 @@ class LabDB:
         observations="",
         requested_by="",
         diagnosis="",
+        insurance_type="SIS",
+        fua_number=None,
         age_years=None,
         sample_date=None
     ):
@@ -368,10 +374,14 @@ class LabDB:
                 age_value = int(age_years)
             except (TypeError, ValueError):
                 age_value = None
+        insurance_value = (insurance_type or "SIS").strip() or "SIS"
+        fua_value = fua_number.strip() if isinstance(fua_number, str) else fua_number
+        if isinstance(fua_value, str) and fua_value == "":
+            fua_value = None
         self.cur.execute("""
-            INSERT INTO orders(patient_id, date, sample_date, created_by, observations, requested_by, diagnosis, age_years, completed)
-            VALUES (?,?,?,?,?,?,?,?,?)
-        """, (patient_id, date_str, sample_date_str, user_id, observations, requested_by, diagnosis, age_value, 0))
+            INSERT INTO orders(patient_id, date, sample_date, created_by, observations, requested_by, diagnosis, insurance_type, fua_number, age_years, completed)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?)
+        """, (patient_id, date_str, sample_date_str, user_id, observations, requested_by, diagnosis, insurance_value, fua_value, age_value, 0))
         order_id = self.cur.lastrowid
         for name in test_names:
             if name in self.test_map:
@@ -505,7 +515,7 @@ class LabDB:
         self.cur.execute("""
             SELECT p.first_name, p.last_name, p.doc_type, p.doc_number, p.birth_date, p.sex, p.origin, p.hcl,
                    p.is_pregnant, p.gestational_age_weeks, p.expected_delivery_date,
-                   o.date, o.sample_date, o.observations, o.requested_by, o.diagnosis, o.age_years, o.emitted, o.emitted_at
+                   o.date, o.sample_date, o.observations, o.requested_by, o.diagnosis, o.insurance_type, o.fua_number, o.age_years, o.emitted, o.emitted_at
             FROM orders o
             JOIN patients p ON o.patient_id = p.id
             WHERE o.id = ?
@@ -515,7 +525,7 @@ class LabDB:
             return None
         (first_name, last_name, doc_type, doc_number, birth_date, sex, origin, hcl,
          is_pregnant, gest_age_weeks, expected_delivery,
-         date, sample_date, obs, req_by, diag, age_years, emitted, emitted_at) = header
+         date, sample_date, obs, req_by, diag, insurance_type, fua_number, age_years, emitted, emitted_at) = header
         patient_info = {
             "name": f"{(first_name or '').upper()} {(last_name or '').upper()}".strip(),
             "doc_type": doc_type,
@@ -534,6 +544,8 @@ class LabDB:
             "observations": obs,
             "requested_by": req_by,
             "diagnosis": diag,
+            "insurance_type": insurance_type,
+            "fua_number": fua_number,
             "age_years": age_years,
             "emitted": emitted,
             "emitted_at": emitted_at,
@@ -669,8 +681,8 @@ class LabDB:
         self.cur.execute(
             """
             SELECT ot.id, o.id, o.date, o.sample_date, p.first_name, p.last_name, p.doc_type, p.doc_number,
-                   p.sex, p.birth_date, p.hcl, o.age_years, o.observations, t.name, t.category, ot.result,
-                   ot.sample_status, ot.sample_issue, ot.observation
+                   p.sex, p.birth_date, p.hcl, p.origin, o.age_years, o.observations, o.insurance_type, o.fua_number,
+                   t.name, t.category, ot.result, ot.sample_status, ot.sample_issue, ot.observation
             FROM order_tests ot
             JOIN orders o ON ot.order_id = o.id
             JOIN patients p ON o.patient_id = p.id
@@ -736,6 +748,22 @@ class LabDB:
         self.conn.commit()
         return added
 
+    def update_order_fua(self, order_id, fua_number):
+        if not order_id:
+            return False
+        value = fua_number.strip() if isinstance(fua_number, str) else fua_number
+        if isinstance(value, str) and value == "":
+            value = None
+        self.cur.execute("SELECT id FROM orders WHERE id=?", (order_id,))
+        if not self.cur.fetchone():
+            return False
+        self.cur.execute(
+            "UPDATE orders SET fua_number=? WHERE id=?",
+            (value, order_id)
+        )
+        self.conn.commit()
+        return True
+
     def get_patient_history_by_document(self, doc_number, doc_type=None):
         if not doc_number:
             return []
@@ -743,7 +771,7 @@ class LabDB:
         query = """
             SELECT o.id, o.date, o.sample_date, t.name, ot.result, t.category,
                    p.first_name, p.last_name, p.doc_type, p.doc_number,
-                   p.sex, p.birth_date, p.hcl, o.age_years, o.observations, o.emitted, o.emitted_at,
+                   p.sex, p.birth_date, p.hcl, p.origin, o.age_years, o.observations, o.insurance_type, o.fua_number, o.emitted, o.emitted_at,
                    ot.sample_status, ot.sample_issue, ot.observation, ot.id
             FROM orders o
             JOIN patients p ON o.patient_id = p.id
