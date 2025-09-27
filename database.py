@@ -490,17 +490,18 @@ class LabDB:
             SELECT o.id, p.first_name, p.last_name, o.date, p.doc_type, p.doc_number
             FROM orders o
             JOIN patients p ON o.patient_id=p.id
-            WHERE o.completed=0
+            WHERE o.completed=0 AND (o.deleted IS NULL OR o.deleted=0)
             ORDER BY o.date ASC, o.id ASC
         """)
         return self.cur.fetchall()
+
     def get_completed_orders(self, include_emitted=False):
         if include_emitted:
             self.cur.execute("""
                 SELECT o.id, p.first_name, p.last_name, o.date, p.doc_type, p.doc_number, o.emitted, o.emitted_at
                 FROM orders o
                 JOIN patients p ON o.patient_id=p.id
-                WHERE o.completed=1
+                WHERE o.completed=1 AND (o.deleted IS NULL OR o.deleted=0)
                 ORDER BY o.date ASC, o.id ASC
             """)
         else:
@@ -509,6 +510,7 @@ class LabDB:
                 FROM orders o
                 JOIN patients p ON o.patient_id=p.id
                 WHERE o.completed=1 AND (o.emitted IS NULL OR o.emitted=0)
+                  AND (o.deleted IS NULL OR o.deleted=0)
                 ORDER BY o.date ASC, o.id ASC
             """)
         return self.cur.fetchall()

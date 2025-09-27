@@ -1,0 +1,78 @@
+diff --git a/database.py b/database.py
+index 7f2393b8efe21ecc4239455f7c529b2a81bac0a4..9ba676c209b308ca18b8ecb5180242e30a295bf8 100644
+--- a/database.py
++++ b/database.py
+@@ -468,69 +468,71 @@ class LabDB:
+         self.cur.execute(
+             """
+             UPDATE order_tests
+             SET deleted=1,
+                 deleted_reason=?,
+                 deleted_by=?,
+                 deleted_at=?
+             WHERE id=?
+             """,
+             (reason or "", user_id, timestamp, order_test_id)
+         )
+         if not self.cur.rowcount:
+             return False
+         self.conn.commit()
+         self.cur.execute("SELECT order_id FROM order_tests WHERE id=?", (order_test_id,))
+         row = self.cur.fetchone()
+         if row:
+             self._update_order_completion(row[0])
+         return True
+ 
+     def get_pending_orders(self):
+         self.cur.execute("""
+             SELECT o.id, p.first_name, p.last_name, o.date, p.doc_type, p.doc_number
+             FROM orders o
+             JOIN patients p ON o.patient_id=p.id
+-            WHERE o.completed=0
++            WHERE o.completed=0 AND (o.deleted IS NULL OR o.deleted=0)
+             ORDER BY o.date ASC, o.id ASC
+         """)
+         return self.cur.fetchall()
++
+     def get_completed_orders(self, include_emitted=False):
+         if include_emitted:
+             self.cur.execute("""
+                 SELECT o.id, p.first_name, p.last_name, o.date, p.doc_type, p.doc_number, o.emitted, o.emitted_at
+                 FROM orders o
+                 JOIN patients p ON o.patient_id=p.id
+-                WHERE o.completed=1
++                WHERE o.completed=1 AND (o.deleted IS NULL OR o.deleted=0)
+                 ORDER BY o.date ASC, o.id ASC
+             """)
+         else:
+             self.cur.execute("""
+                 SELECT o.id, p.first_name, p.last_name, o.date, p.doc_type, p.doc_number, o.emitted, o.emitted_at
+                 FROM orders o
+                 JOIN patients p ON o.patient_id=p.id
+                 WHERE o.completed=1 AND (o.emitted IS NULL OR o.emitted=0)
++                  AND (o.deleted IS NULL OR o.deleted=0)
+                 ORDER BY o.date ASC, o.id ASC
+             """)
+         return self.cur.fetchall()
+     def get_order_details(self, order_id):
+         self.cur.execute("""
+             SELECT p.first_name, p.last_name, p.doc_type, p.doc_number, p.birth_date, p.sex, p.origin, p.hcl,
+                    p.is_pregnant, p.gestational_age_weeks, p.expected_delivery_date,
+                    o.date, o.sample_date, o.observations, o.requested_by, o.diagnosis, o.insurance_type, o.fua_number, o.age_years, o.emitted, o.emitted_at
+             FROM orders o
+             JOIN patients p ON o.patient_id = p.id
+             WHERE o.id = ?
+         """, (order_id,))
+         header = self.cur.fetchone()
+         if not header:
+             return None
+         (first_name, last_name, doc_type, doc_number, birth_date, sex, origin, hcl,
+          is_pregnant, gest_age_weeks, expected_delivery,
+          date, sample_date, obs, req_by, diag, insurance_type, fua_number, age_years, emitted, emitted_at) = header
+         patient_info = {
+             "name": f"{(first_name or '').upper()} {(last_name or '').upper()}".strip(),
+             "doc_type": doc_type,
+             "doc_number": doc_number,
+             "birth_date": birth_date,
+             "sex": sex,
+             "origin": origin,
