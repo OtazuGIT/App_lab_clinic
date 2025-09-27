@@ -4498,9 +4498,9 @@ class MainWindow(QMainWindow):
             return
         prev_left, prev_top, prev_right, prev_bottom = pdf.l_margin, pdf.t_margin, pdf.r_margin, pdf.b_margin
         prev_auto = pdf.auto_page_break
-        pdf.set_margins(6, 10, 6)
-        pdf.set_auto_page_break(True, margin=10)
-        self._add_pdf_page(pdf, orientation='L', page_format='A5')
+        pdf.set_margins(10, 14, 10)
+        pdf.set_auto_page_break(True, margin=12)
+        self._add_pdf_page(pdf, orientation='L', page_format='A4')
         pdf.set_font("Arial", 'B', 11)
         pdf.cell(0, 6, self._ensure_latin1("Entrega de resultados"), ln=1, align='C')
         base_date = report_date
@@ -4517,12 +4517,16 @@ class MainWindow(QMainWindow):
             align='C'
         )
         pdf.ln(1.5)
+        available_width = max(pdf.w - pdf.l_margin - pdf.r_margin, 0)
         columns = [
-            {"title": "Fecha de entrega", "width": 24, "min_lines": 1},
-            {"title": "Paciente", "width": 42, "min_lines": 2},
-            {"title": "Pruebas entregadas", "width": 58, "min_lines": 2},
-            {"title": "Entregado por", "width": 34, "min_lines": 2},
-            {"title": "Personal que recibe / Observaciones", "width": 40, "min_lines": 3},
+            {"title": "Fecha de entrega", "ratio": 0.16, "min_lines": 1},
+            {"title": "Paciente", "ratio": 0.22, "min_lines": 2},
+            {"title": "Pruebas entregadas", "ratio": 0.26, "min_lines": 2},
+            {"title": "Entregado por", "ratio": 0.16, "min_lines": 2},
+            {"title": "Personal que recibe / Observaciones", "ratio": 0.20, "min_lines": 3},
+        ]
+        column_widths = [
+            max(available_width * column["ratio"], 22) for column in columns
         ]
         padding_x = 1.2
         padding_y = 1.0
@@ -4561,8 +4565,9 @@ class MainWindow(QMainWindow):
         pdf.set_font("Arial", 'B', 7.6)
         header_lines = []
         max_header_lines = 1
-        for column in columns:
-            text_lines = wrap_text(column["title"], column["width"] - 2 * padding_x, 1)
+        for idx, column in enumerate(columns):
+            column_width = column_widths[idx]
+            text_lines = wrap_text(column["title"], column_width - 2 * padding_x, 1)
             header_lines.append(text_lines)
             if len(text_lines) > max_header_lines:
                 max_header_lines = len(text_lines)
@@ -4571,7 +4576,7 @@ class MainWindow(QMainWindow):
         start_y = pdf.get_y()
         pdf.set_fill_color(210, 210, 210)
         for idx, column in enumerate(columns):
-            width = column["width"]
+            width = column_widths[idx]
             pdf.rect(start_x, start_y, width, header_height, style='DF')
             text_y = start_y + padding_y
             for line in header_lines[idx]:
@@ -4592,14 +4597,14 @@ class MainWindow(QMainWindow):
             ]
             wrapped = []
             max_lines = 1
-            for column, value in zip(columns, cell_values):
-                lines = wrap_text(value, column["width"] - 2 * padding_x, column["min_lines"])
+            for column, width, value in zip(columns, column_widths, cell_values):
+                lines = wrap_text(value, width - 2 * padding_x, column["min_lines"])
                 wrapped.append(lines)
                 if len(lines) > max_lines:
                     max_lines = len(lines)
             row_height = max_lines * line_height + 2 * padding_y
             if pdf.get_y() + row_height > pdf.h - pdf.b_margin:
-                self._add_pdf_page(pdf, orientation='L', page_format='A5')
+                self._add_pdf_page(pdf, orientation='L', page_format='A4')
                 pdf.set_font("Arial", 'B', 11)
                 pdf.cell(0, 6, self._ensure_latin1("Entrega de resultados"), ln=1, align='C')
                 pdf.set_font("Arial", '', 9)
@@ -4615,7 +4620,7 @@ class MainWindow(QMainWindow):
                 start_x = pdf.l_margin
                 start_y = pdf.get_y()
                 for idx, column in enumerate(columns):
-                    width = column["width"]
+                    width = column_widths[idx]
                     pdf.rect(start_x, start_y, width, header_height, style='DF')
                     text_y = start_y + padding_y
                     for line in header_lines[idx]:
@@ -4628,7 +4633,7 @@ class MainWindow(QMainWindow):
             row_start_x = pdf.l_margin
             row_start_y = pdf.get_y()
             for idx, column in enumerate(columns):
-                width = column["width"]
+                width = column_widths[idx]
                 pdf.rect(row_start_x, row_start_y, width, row_height)
                 text_y = row_start_y + padding_y
                 for line in wrapped[idx]:
