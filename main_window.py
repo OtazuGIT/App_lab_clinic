@@ -2425,6 +2425,21 @@ class MainWindow(QMainWindow):
         except ValueError:
             return None
 
+    def _add_pdf_page(self, pdf, orientation=None, page_format=None):
+        """Compatibilidad para agregar páginas en diferentes versiones de FPDF."""
+        kwargs = {}
+        if orientation:
+            kwargs["orientation"] = orientation
+        if page_format is not None:
+            kwargs["format"] = page_format
+        try:
+            pdf.add_page(**kwargs)
+        except TypeError:
+            if page_format is not None:
+                kwargs.pop("format", None)
+                kwargs["size"] = page_format
+            pdf.add_page(**kwargs)
+
     def _ensure_latin1(self, text):
         if text is None:
             return ""
@@ -4461,7 +4476,7 @@ class MainWindow(QMainWindow):
         prev_auto = pdf.auto_page_break
         pdf.set_margins(6, 10, 6)
         pdf.set_auto_page_break(True, margin=10)
-        pdf.add_page(orientation='L', format='A5')
+        self._add_pdf_page(pdf, orientation='L', page_format='A5')
         pdf.set_font("Arial", 'B', 11)
         pdf.cell(0, 6, self._ensure_latin1("Entrega de resultados"), ln=1, align='C')
         base_date = report_date
@@ -4560,7 +4575,7 @@ class MainWindow(QMainWindow):
                     max_lines = len(lines)
             row_height = max_lines * line_height + 2 * padding_y
             if pdf.get_y() + row_height > pdf.h - pdf.b_margin:
-                pdf.add_page(orientation='L', format='A5')
+                self._add_pdf_page(pdf, orientation='L', page_format='A5')
                 pdf.set_font("Arial", 'B', 11)
                 pdf.cell(0, 6, self._ensure_latin1("Entrega de resultados"), ln=1, align='C')
                 pdf.set_font("Arial", '', 9)
