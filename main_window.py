@@ -2428,35 +2428,41 @@ class MainWindow(QMainWindow):
 
     def _add_pdf_page(self, pdf, orientation=None, page_format=None):
         """Compatibilidad para agregar páginas en diferentes versiones de FPDF."""
-        try:
-            params = inspect.signature(pdf.add_page).parameters
-        except (TypeError, ValueError):
-            params = {}
 
-        args = []
-        kwargs = {}
+        attempts = []
 
+        base_kwargs = {}
         if orientation:
-            if "orientation" in params:
-                kwargs["orientation"] = orientation
-            else:
-                args.append(orientation)
+            base_kwargs["orientation"] = orientation
 
         if page_format is not None:
-            if "format" in params:
-                kwargs["format"] = page_format
-            elif "size" in params:
-                kwargs["size"] = page_format
-            else:
-                # If we already plan to pass the orientation as a keyword argument
-                # but the FPDF version expects positional parameters, convert the
-                # orientation argument back to positional so that the page format can
-                # occupy the second positional slot without conflicting.
-                if "orientation" in kwargs and not args:
-                    args.append(kwargs.pop("orientation"))
-                args.append(page_format)
+            kwargs_format = {**base_kwargs, "format": page_format}
+            attempts.append(((), kwargs_format))
 
-        pdf.add_page(*args, **kwargs)
+            kwargs_size = {**base_kwargs, "size": page_format}
+            attempts.append(((), kwargs_size))
+        else:
+            attempts.append(((), base_kwargs))
+
+        positional_args = []
+        if orientation:
+            positional_args.append(orientation)
+
+        if page_format is not None:
+            attempts.append((tuple(positional_args + [page_format]), {}))
+            attempts.append((tuple(positional_args), {"format": page_format}))
+            attempts.append((tuple(positional_args), {"size": page_format}))
+        else:
+            attempts.append((tuple(positional_args), {}))
+
+        for args, kwargs in attempts:
+            try:
+                pdf.add_page(*args, **kwargs)
+                return
+            except TypeError:
+                continue
+
+        raise TypeError("No se pudo agregar la página al PDF con los parámetros proporcionados")
 
     def _ensure_latin1(self, text):
         if text is None:

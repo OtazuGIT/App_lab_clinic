@@ -1,0 +1,114 @@
+diff --git a/main_window.py b/main_window.py
+index 3bfd34144235924fc5558a3dad67eb52684719ea..3e0c369a2b9b65210adb84a79b9d6e86684e7b0b 100644
+--- a/main_window.py
++++ b/main_window.py
+@@ -2406,79 +2406,85 @@ class MainWindow(QMainWindow):
+             widget = field_info.get("widget")
+             return widget.text().strip() if widget else ""
+         if field_type == "text_area":
+             widget = field_info.get("widget")
+             return widget.toPlainText().strip() if widget else ""
+         if field_type == "combo":
+             widget = field_info.get("widget")
+             return widget.currentText().strip() if widget else ""
+         if field_type == "bool":
+             if field_info.get("positive") and field_info["positive"].isChecked():
+                 return field_info.get("positive_text", "Positivo")
+             if field_info.get("negative") and field_info["negative"].isChecked():
+                 return field_info.get("negative_text", "Negativo")
+             return ""
+         return ""
+     def _to_float(self, text):
+         if text in (None, ""):
+             return None
+         try:
+             return float(str(text).replace(',', '.'))
+         except ValueError:
+             return None
+ 
+     def _add_pdf_page(self, pdf, orientation=None, page_format=None):
+         """Compatibilidad para agregar páginas en diferentes versiones de FPDF."""
+-        try:
+-            params = inspect.signature(pdf.add_page).parameters
+-        except (TypeError, ValueError):
+-            params = {}
+ 
+-        args = []
+-        kwargs = {}
++        attempts = []
+ 
++        base_kwargs = {}
+         if orientation:
+-            if "orientation" in params:
+-                kwargs["orientation"] = orientation
+-            else:
+-                args.append(orientation)
++            base_kwargs["orientation"] = orientation
+ 
+         if page_format is not None:
+-            if "format" in params:
+-                kwargs["format"] = page_format
+-            elif "size" in params:
+-                kwargs["size"] = page_format
+-            else:
+-                # If we already plan to pass the orientation as a keyword argument
+-                # but the FPDF version expects positional parameters, convert the
+-                # orientation argument back to positional so that the page format can
+-                # occupy the second positional slot without conflicting.
+-                if "orientation" in kwargs and not args:
+-                    args.append(kwargs.pop("orientation"))
+-                args.append(page_format)
+-
+-        pdf.add_page(*args, **kwargs)
++            kwargs_format = {**base_kwargs, "format": page_format}
++            attempts.append(((), kwargs_format))
++
++            kwargs_size = {**base_kwargs, "size": page_format}
++            attempts.append(((), kwargs_size))
++        else:
++            attempts.append(((), base_kwargs))
++
++        positional_args = []
++        if orientation:
++            positional_args.append(orientation)
++
++        if page_format is not None:
++            attempts.append((tuple(positional_args + [page_format]), {}))
++            attempts.append((tuple(positional_args), {"format": page_format}))
++            attempts.append((tuple(positional_args), {"size": page_format}))
++        else:
++            attempts.append((tuple(positional_args), {}))
++
++        for args, kwargs in attempts:
++            try:
++                pdf.add_page(*args, **kwargs)
++                return
++            except TypeError:
++                continue
++
++        raise TypeError("No se pudo agregar la página al PDF con los parámetros proporcionados")
+ 
+     def _ensure_latin1(self, text):
+         if text is None:
+             return ""
+         if not isinstance(text, str):
+             text = str(text)
+         replacements = {
+             '\u2013': '-',
+             '\u2014': '-',
+             '\u2018': "'",
+             '\u2019': "'",
+             '\u201c': '"',
+             '\u201d': '"'
+         }
+         for bad, good in replacements.items():
+             text = text.replace(bad, good)
+         try:
+             text.encode('latin-1')
+             return text
+         except UnicodeEncodeError:
+             return text.encode('latin-1', 'replace').decode('latin-1')
+ 
+     def _is_blank_result(self, value):
+         if value is None:
+             return True
