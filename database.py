@@ -1,6 +1,7 @@
 # database.py
 import json
 import sqlite3
+from collections import OrderedDict
 class LabDB:
     def __init__(self, db_path="lab_db.sqlite"):
         self.db_path = db_path
@@ -654,28 +655,64 @@ class LabDB:
             (emitted_at, order_id)
         )
         self.conn.commit()
-    def get_statistics(self):
+    def get_statistics(self, start_datetime=None, end_datetime=None):
         stats = {}
-        self.cur.execute("SELECT COUNT(*) FROM patients"); stats["total_patients"] = self.cur.fetchone()[0]
-        self.cur.execute("SELECT COUNT(*) FROM orders WHERE (deleted IS NULL OR deleted=0)"); stats["total_orders"] = self.cur.fetchone()[0]
-        self.cur.execute("""
-            SELECT COUNT(*)
-            FROM order_tests ot
-            JOIN orders o ON ot.order_id = o.id
-            WHERE (ot.deleted IS NULL OR ot.deleted=0)
-              AND (o.deleted IS NULL OR o.deleted=0)
-        """)
+        order_where = "WHERE (o.deleted IS NULL OR o.deleted=0)"
+        order_params = []
+        tests_where = (
+            "FROM order_tests ot "
+            "JOIN orders o ON ot.order_id = o.id "
+            "WHERE (ot.deleted IS NULL OR ot.deleted=0) "
+            "AND (o.deleted IS NULL OR o.deleted=0)"
+        )
+        tests_params = []
+        if start_datetime and end_datetime:
+            order_where += " AND datetime(o.date) BETWEEN datetime(?) AND datetime(?)"
+            order_params = [start_datetime, end_datetime]
+            tests_where += " AND datetime(o.date) BETWEEN datetime(?) AND datetime(?)"
+            tests_params = [start_datetime, end_datetime]
+        self.cur.execute(f"SELECT COUNT(DISTINCT o.patient_id) FROM orders o {order_where}", order_params)
+        row = self.cur.fetchone()
+        stats["total_patients"] = row[0] if row and row[0] is not None else 0
+        self.cur.execute(f"SELECT COUNT(*) FROM orders o {order_where}", order_params)
+        stats["total_orders"] = self.cur.fetchone()[0]
+        self.cur.execute(f"SELECT COUNT(*) {tests_where}", tests_params)
         stats["total_tests_conducted"] = self.cur.fetchone()[0]
-        self.cur.execute("""
+        self.cur.execute(
+            """
             SELECT t.category, COUNT(*)
             FROM order_tests ot
             JOIN tests t ON ot.test_id = t.id
             JOIN orders o ON ot.order_id = o.id
             WHERE (ot.deleted IS NULL OR ot.deleted=0)
               AND (o.deleted IS NULL OR o.deleted=0)
-            GROUP BY t.category
-        """)
+        """
+            + (" AND datetime(o.date) BETWEEN datetime(?) AND datetime(?)" if tests_params else "") +
+            " GROUP BY t.category",
+            tests_params
+        )
         stats["by_category"] = self.cur.fetchall()
+        self.cur.execute(
+            """
+            SELECT t.category, t.name, COUNT(*)
+            FROM order_tests ot
+            JOIN tests t ON ot.test_id = t.id
+            JOIN orders o ON ot.order_id = o.id
+            WHERE (ot.deleted IS NULL OR ot.deleted=0)
+              AND (o.deleted IS NULL OR o.deleted=0)
+        """
+            + (" AND datetime(o.date) BETWEEN datetime(?) AND datetime(?)" if tests_params else "") +
+            " GROUP BY t.category, t.name ORDER BY t.category, t.name",
+            tests_params
+        )
+        detail_rows = self.cur.fetchall()
+        detail = OrderedDict()
+        for category, test_name, count in detail_rows:
+            if category not in detail:
+                detail[category] = {"total": 0, "tests": []}
+            detail[category]["tests"].append((test_name, count))
+            detail[category]["total"] += count
+        stats["by_category_detail"] = detail
         return stats
     def get_results_in_range(self, start_datetime, end_datetime):
         self.cur.execute(

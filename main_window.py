@@ -11,11 +11,29 @@ from PyQt5.QtWidgets import (QMainWindow, QWidget, QLabel, QPushButton, QVBoxLay
                              QStackedWidget, QFormLayout, QScrollArea, QGroupBox, QComboBox,
                              QLineEdit, QTextEdit, QTableWidget, QTableWidgetItem, QFileDialog, QMessageBox, QCheckBox,
                              QDateEdit, QRadioButton, QButtonGroup, QDialog, QDialogButtonBox, QListWidget, QListWidgetItem,
-                             QSpinBox, QInputDialog)
+                             QSpinBox, QInputDialog, QAbstractItemView)
 from PyQt5.QtCore import QDate, QDateTime, Qt, QTimer
+from PyQt5.QtGui import QColor, QFont
 from fpdf import FPDF  # Asegúrese de tener fpdf instalado (pip install fpdf)
 
 LAB_TITLE = "Laboratorio P.S. Iñapari - 002789"
+
+MONTH_NAMES_ES = [
+    "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+    "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
+]
+
+CATEGORY_DISPLAY_ORDER = [
+    "HEMATOLOGÍA",
+    "BIOQUÍMICA",
+    "INMUNOLOGÍA",
+    "PRUEBAS RÁPIDAS",
+    "PARASITOLOGÍA",
+    "MICROBIOLOGÍA",
+    "MICROSCOPÍA",
+    "OTROS",
+    "TOMA DE MUESTRA"
+]
 
 REGISTRY_ABBREVIATIONS = {
     "hematocrito": "Hto",
@@ -1132,6 +1150,29 @@ class MainWindow(QMainWindow):
         title_label.setWordWrap(True)
         side_menu_layout.addWidget(title_label)
         side_menu_layout.addSpacing(10)
+        # Estilos y configuración del menú de navegación
+        self.nav_buttons = OrderedDict()
+        self.nav_button_default_style = (
+            "QPushButton {"
+            "background-color: #4CAF50;"
+            "color: white;"
+            "font-size: 14px;"
+            "padding: 10px 12px;"
+            "border: none;"
+            "text-align: left;"
+            "}"
+            "QPushButton:hover { background-color: #45a049; }"
+        )
+        self.nav_button_active_style = (
+            "QPushButton {"
+            "background-color: #1E8449;"
+            "color: white;"
+            "font-size: 14px;"
+            "padding: 10px 12px;"
+            "border: 2px solid #117A65;"
+            "font-weight: bold;"
+            "}"
+        )
         # Secciones/Páginas
         self.stack = QStackedWidget()
         self.current_order_context = None
@@ -1153,39 +1194,35 @@ class MainWindow(QMainWindow):
         # 1. Página de Registro de Pacientes
         self.page_registro = QWidget(); self.init_registro_page()
         self.stack.addWidget(self.page_registro)
-        btn_reg = QPushButton("Registro"); btn_reg.setStyleSheet("background-color: #4CAF50; color: white; font-size: 14px;")
-        btn_reg.clicked.connect(lambda: self.stack.setCurrentWidget(self.page_registro))
+        btn_reg = self._create_nav_button("Registro", self.page_registro)
         side_menu_layout.addWidget(btn_reg)
         # 2. Página de Ingreso de Resultados
         self.page_resultados = QWidget(); self.init_resultados_page()
         self.stack.addWidget(self.page_resultados)
-        btn_res = QPushButton("Anotar Resultados"); btn_res.setStyleSheet("background-color: #4CAF50; color: white; font-size: 14px;")
-        btn_res.clicked.connect(lambda: self.stack.setCurrentWidget(self.page_resultados))
+        btn_res = self._create_nav_button("Anotar Resultados", self.page_resultados)
         side_menu_layout.addWidget(btn_res)
         # 3. Página de Emisión de Resultados
         self.page_emitir = QWidget(); self.init_emitir_page()
         self.stack.addWidget(self.page_emitir)
-        btn_emit = QPushButton("Emitir Resultados"); btn_emit.setStyleSheet("background-color: #4CAF50; color: white; font-size: 14px;")
-        btn_emit.clicked.connect(lambda: self.stack.setCurrentWidget(self.page_emitir))
+        btn_emit = self._create_nav_button("Emitir Resultados", self.page_emitir)
         side_menu_layout.addWidget(btn_emit)
         # 4. Página de Análisis de Datos
         self.page_analisis = QWidget(); self.init_analisis_page()
         self.stack.addWidget(self.page_analisis)
-        btn_an = QPushButton("Análisis de Datos"); btn_an.setStyleSheet("background-color: #4CAF50; color: white; font-size: 14px;")
-        btn_an.clicked.connect(lambda: self.stack.setCurrentWidget(self.page_analisis))
+        btn_an = self._create_nav_button("Análisis de Datos", self.page_analisis)
         side_menu_layout.addWidget(btn_an)
         # 5. Página de Configuración (solo visible para superusuario)
         if self.user['role'] == 'super':
             self.page_config = QWidget(); self.init_config_page()
             self.stack.addWidget(self.page_config)
-            btn_conf = QPushButton("Configuración"); btn_conf.setStyleSheet("background-color: #4CAF50; color: white; font-size: 14px;")
-            btn_conf.clicked.connect(lambda: self.stack.setCurrentWidget(self.page_config))
+            btn_conf = self._create_nav_button("Configuración", self.page_config)
             side_menu_layout.addWidget(btn_conf)
         side_menu_layout.addStretch()
         main_layout.addWidget(side_menu_widget)
         main_layout.addWidget(content_widget)
         self.setCentralWidget(central_widget)
         self.stack.setCurrentWidget(self.page_registro)  # Mostrar la sección de registro al inicio
+        self._update_nav_styles()
         # Actualizar datos dinámicos al cambiar de página
         self.stack.currentChanged.connect(self.on_page_changed)
         # Variables auxiliares
@@ -1208,6 +1245,23 @@ class MainWindow(QMainWindow):
             self.populate_completed_orders()
         elif current_widget == self.page_analisis:
             self.refresh_statistics()
+        self._update_nav_styles()
+
+    def _create_nav_button(self, text, page_widget):
+        button = QPushButton(text)
+        button.setCursor(Qt.PointingHandCursor)
+        button.setStyleSheet(self.nav_button_default_style)
+        button.clicked.connect(lambda: self.stack.setCurrentWidget(page_widget))
+        self.nav_buttons[page_widget] = button
+        return button
+
+    def _update_nav_styles(self):
+        current_widget = self.stack.currentWidget()
+        for widget, button in self.nav_buttons.items():
+            if widget == current_widget:
+                button.setStyleSheet(self.nav_button_active_style)
+            else:
+                button.setStyleSheet(self.nav_button_default_style)
     def _update_clock(self):
         self.clock_label.setText(QDateTime.currentDateTime().toString("dd/MM/yyyy HH:mm:ss"))
 
@@ -3954,10 +4008,41 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Error", f"No se pudo exportar:\n{e}")
     def init_analisis_page(self):
         layout = QVBoxLayout(self.page_analisis)
+        stats_controls_layout = QHBoxLayout()
+        stats_controls_layout.addWidget(QLabel("Visualizar por:"))
+        self.stats_mode_combo = QComboBox()
+        self.stats_mode_combo.addItems(["Mes", "Trimestre"])
+        stats_controls_layout.addWidget(self.stats_mode_combo)
+        today = datetime.date.today()
+        self.stats_month_label = QLabel("Mes:")
+        stats_controls_layout.addWidget(self.stats_month_label)
+        self.stats_month_combo = QComboBox()
+        self.stats_month_combo.addItems(MONTH_NAMES_ES)
+        self.stats_month_combo.setCurrentIndex(max(0, today.month - 1))
+        stats_controls_layout.addWidget(self.stats_month_combo)
+        self.stats_quarter_label = QLabel("Trimestre:")
+        stats_controls_layout.addWidget(self.stats_quarter_label)
+        self.stats_quarter_combo = QComboBox()
+        self.stats_quarter_combo.addItems(["I", "II", "III", "IV"])
+        self.stats_quarter_combo.setCurrentIndex((today.month - 1) // 3)
+        stats_controls_layout.addWidget(self.stats_quarter_combo)
+        stats_controls_layout.addWidget(QLabel("Año:"))
+        self.stats_year_spin = QSpinBox()
+        self.stats_year_spin.setRange(2000, 2100)
+        self.stats_year_spin.setValue(today.year)
+        stats_controls_layout.addWidget(self.stats_year_spin)
+        stats_controls_layout.addStretch()
+        layout.addLayout(stats_controls_layout)
         self.stats_label = QLabel()
+        self.stats_label.setStyleSheet("font-weight: bold;")
         layout.addWidget(self.stats_label)
-        self.stats_table = QTableWidget(0, 2)
-        self.stats_table.setHorizontalHeaderLabels(["Categoría", "Cantidad"])
+        self.stats_table = QTableWidget(0, 3)
+        self.stats_table.setHorizontalHeaderLabels(["Área", "Examen", "Cantidad"])
+        self.stats_table.setAlternatingRowColors(True)
+        self.stats_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.stats_table.setSelectionMode(QAbstractItemView.NoSelection)
+        self.stats_table.verticalHeader().setVisible(False)
+        self.stats_table.horizontalHeader().setStretchLastSection(True)
         layout.addWidget(self.stats_table)
         controls_layout = QHBoxLayout()
         controls_layout.addWidget(QLabel("Período:"))
@@ -4057,6 +4142,11 @@ class MainWindow(QMainWindow):
         self.history_column_map = {header: idx for idx, header in enumerate(history_headers)}
         history_layout.addWidget(self.history_table)
         layout.addWidget(history_group)
+        self._stats_controls_ready = False
+        self.stats_mode_combo.currentIndexChanged.connect(self._update_stats_period_controls)
+        self.stats_month_combo.currentIndexChanged.connect(lambda _: self.refresh_statistics())
+        self.stats_quarter_combo.currentIndexChanged.connect(lambda _: self.refresh_statistics())
+        self.stats_year_spin.valueChanged.connect(lambda _: self.refresh_statistics())
         self._history_results = []
         self.range_combo.currentIndexChanged.connect(self._update_range_controls)
         self.view_activity_btn.clicked.connect(self.load_activity_summary)
@@ -4064,25 +4154,100 @@ class MainWindow(QMainWindow):
         self.export_activity_csv_btn.clicked.connect(lambda: self.export_activity_record("csv"))
         self.delete_activity_btn.clicked.connect(self.delete_selected_activity_entries)
         self._update_range_controls()
+        self._stats_controls_ready = True
+        self._update_stats_period_controls()
         self.history_doc_input.returnPressed.connect(self.search_patient_history)
         self.history_search_btn.clicked.connect(self.search_patient_history)
         self.history_open_btn.clicked.connect(self.open_history_order_from_analysis)
         self.history_table.itemSelectionChanged.connect(self._on_history_selection_changed)
         self.history_fua_btn.clicked.connect(self.edit_history_fua)
     def refresh_statistics(self):
-        stats = self.labdb.get_statistics()
-        text = (f"Pacientes registrados: {stats['total_patients']}\n"
-                f"Órdenes realizadas: {stats['total_orders']}\n"
-                f"Pruebas realizadas: {stats['total_tests_conducted']}")
-        self.stats_label.setText(text)
-        # Llenar tabla de categorías
+        if not getattr(self, '_stats_controls_ready', False):
+            return
+        period = self._get_statistics_period()
+        start_dt = datetime.datetime.combine(period['start'], datetime.time(0, 0, 0))
+        end_dt = datetime.datetime.combine(period['end'], datetime.time(23, 59, 59))
+        stats = self.labdb.get_statistics(start_dt.isoformat(sep=' '), end_dt.isoformat(sep=' '))
+        summary_lines = [
+            f"Período: {period['label']}",
+            f"Pacientes atendidos: {stats['total_patients']}",
+            f"Órdenes realizadas: {stats['total_orders']}",
+            f"Pruebas realizadas: {stats['total_tests_conducted']}"
+        ]
+        self.stats_label.setText("\n".join(summary_lines))
         self.stats_table.setRowCount(0)
-        for (cat, count) in stats['by_category']:
-            row = self.stats_table.rowCount()
-            self.stats_table.insertRow(row)
-            self.stats_table.setItem(row, 0, QTableWidgetItem(cat))
-            self.stats_table.setItem(row, 1, QTableWidgetItem(str(count)))
+        detail = stats.get('by_category_detail', OrderedDict())
+        ordered_categories = [cat for cat in CATEGORY_DISPLAY_ORDER if cat in detail]
+        remaining = [cat for cat in detail.keys() if cat not in ordered_categories]
+        categories = ordered_categories + remaining
+        header_font = QFont()
+        header_font.setBold(True)
+        highlight_color = QColor(230, 242, 235)
+        for category in categories:
+            data = detail.get(category, {})
+            total = data.get('total', 0)
+            tests = data.get('tests', [])
+            header_row = self.stats_table.rowCount()
+            self.stats_table.insertRow(header_row)
+            area_item = QTableWidgetItem(category)
+            area_item.setFont(header_font)
+            area_item.setBackground(highlight_color)
+            self.stats_table.setItem(header_row, 0, area_item)
+            total_label_item = QTableWidgetItem("Total del área")
+            total_label_item.setFont(header_font)
+            total_label_item.setBackground(highlight_color)
+            self.stats_table.setItem(header_row, 1, total_label_item)
+            total_item = QTableWidgetItem(str(total))
+            total_item.setFont(header_font)
+            total_item.setBackground(highlight_color)
+            total_item.setTextAlignment(Qt.AlignCenter)
+            self.stats_table.setItem(header_row, 2, total_item)
+            for test_name, count in tests:
+                row = self.stats_table.rowCount()
+                self.stats_table.insertRow(row)
+                self.stats_table.setItem(row, 0, QTableWidgetItem(""))
+                exam_item = QTableWidgetItem(f"• {test_name}")
+                self.stats_table.setItem(row, 1, exam_item)
+                count_item = QTableWidgetItem(str(count))
+                count_item.setTextAlignment(Qt.AlignCenter)
+                self.stats_table.setItem(row, 2, count_item)
         self.load_activity_summary()
+
+    def _update_stats_period_controls(self):
+        if not hasattr(self, 'stats_mode_combo'):
+            return
+        is_month = self.stats_mode_combo.currentIndex() == 0
+        self.stats_month_label.setVisible(is_month)
+        self.stats_month_combo.setVisible(is_month)
+        self.stats_quarter_label.setVisible(not is_month)
+        self.stats_quarter_combo.setVisible(not is_month)
+        if getattr(self, '_stats_controls_ready', False):
+            self.refresh_statistics()
+
+    def _get_statistics_period(self):
+        year = self.stats_year_spin.value() if hasattr(self, 'stats_year_spin') else datetime.date.today().year
+        if self.stats_mode_combo.currentIndex() == 0:
+            month = max(1, self.stats_month_combo.currentIndex() + 1)
+            start = datetime.date(year, month, 1)
+            if month == 12:
+                next_month_start = datetime.date(year + 1, 1, 1)
+            else:
+                next_month_start = datetime.date(year, month + 1, 1)
+            end = next_month_start - datetime.timedelta(days=1)
+            label = f"{MONTH_NAMES_ES[month - 1]} {year}"
+        else:
+            quarter = max(1, self.stats_quarter_combo.currentIndex() + 1)
+            start_month = 3 * (quarter - 1) + 1
+            start = datetime.date(year, start_month, 1)
+            end_month = start_month + 2
+            if end_month >= 12:
+                next_start = datetime.date(year + 1, 1, 1)
+            else:
+                next_start = datetime.date(year, end_month + 1, 1)
+            end = next_start - datetime.timedelta(days=1)
+            label = (f"Trimestre {quarter} ({MONTH_NAMES_ES[start_month - 1]} - "
+                     f"{MONTH_NAMES_ES[end_month - 1]} {year})")
+        return {"start": start, "end": end, "label": label}
 
     def _update_range_controls(self):
         if not hasattr(self, 'range_combo'):

@@ -1,0 +1,159 @@
+diff --git a/database.py b/database.py
+index b9ae2e6e7a2ba2ddac90c46459c859bec641d6e4..7f2393b8efe21ecc4239455f7c529b2a81bac0a4 100644
+--- a/database.py
++++ b/database.py
+@@ -1,28 +1,29 @@
+ # database.py
+ import json
+ import sqlite3
++from collections import OrderedDict
+ class LabDB:
+     def __init__(self, db_path="lab_db.sqlite"):
+         self.db_path = db_path
+         self.conn = None
+         self.cur = None
+         self.test_map = {}
+     def connect(self):
+         self.conn = sqlite3.connect(self.db_path)
+         self.cur = self.conn.cursor()
+         self.cur.execute("PRAGMA foreign_keys = ON")
+         self.conn.commit()
+     def init_db(self):
+         # Crear tablas
+         self.cur.execute("""
+             CREATE TABLE IF NOT EXISTS users (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 username TEXT UNIQUE,
+                 password TEXT,
+                 role TEXT
+             )
+         """)
+         self._ensure_column_exists("users", "full_name", "TEXT")
+         self._ensure_column_exists("users", "profession", "TEXT")
+         self._ensure_column_exists("users", "license", "TEXT")
+         self.cur.execute("""
+diff --git a/database.py b/database.py
+index b9ae2e6e7a2ba2ddac90c46459c859bec641d6e4..7f2393b8efe21ecc4239455f7c529b2a81bac0a4 100644
+--- a/database.py
++++ b/database.py
+@@ -632,72 +633,108 @@ class LabDB:
+             for result, sample_status in rows:
+                 status = (sample_status or "recibida").strip().lower()
+                 if status == "pendiente":
+                     pending += 1
+                     continue
+                 if status == "rechazada":
+                     continue
+                 if result in (None, ""):
+                     pending += 1
+             completed_flag = 0 if pending else 1
+         self.cur.execute("UPDATE orders SET completed=? WHERE id=?", (completed_flag, order_id))
+         self.conn.commit()
+         return completed_flag
+ 
+     def mark_order_emitted(self, order_id, emitted_at):
+         self.cur.execute(
+             """
+             UPDATE orders
+             SET emitted=1,
+                 emitted_at=COALESCE(emitted_at, ?)
+             WHERE id=?
+             """,
+             (emitted_at, order_id)
+         )
+         self.conn.commit()
+-    def get_statistics(self):
++    def get_statistics(self, start_datetime=None, end_datetime=None):
+         stats = {}
+-        self.cur.execute("SELECT COUNT(*) FROM patients"); stats["total_patients"] = self.cur.fetchone()[0]
+-        self.cur.execute("SELECT COUNT(*) FROM orders WHERE (deleted IS NULL OR deleted=0)"); stats["total_orders"] = self.cur.fetchone()[0]
+-        self.cur.execute("""
+-            SELECT COUNT(*)
++        order_where = "WHERE (o.deleted IS NULL OR o.deleted=0)"
++        order_params = []
++        tests_where = (
++            "FROM order_tests ot "
++            "JOIN orders o ON ot.order_id = o.id "
++            "WHERE (ot.deleted IS NULL OR ot.deleted=0) "
++            "AND (o.deleted IS NULL OR o.deleted=0)"
++        )
++        tests_params = []
++        if start_datetime and end_datetime:
++            order_where += " AND datetime(o.date) BETWEEN datetime(?) AND datetime(?)"
++            order_params = [start_datetime, end_datetime]
++            tests_where += " AND datetime(o.date) BETWEEN datetime(?) AND datetime(?)"
++            tests_params = [start_datetime, end_datetime]
++        self.cur.execute(f"SELECT COUNT(DISTINCT o.patient_id) FROM orders o {order_where}", order_params)
++        row = self.cur.fetchone()
++        stats["total_patients"] = row[0] if row and row[0] is not None else 0
++        self.cur.execute(f"SELECT COUNT(*) FROM orders o {order_where}", order_params)
++        stats["total_orders"] = self.cur.fetchone()[0]
++        self.cur.execute(f"SELECT COUNT(*) {tests_where}", tests_params)
++        stats["total_tests_conducted"] = self.cur.fetchone()[0]
++        self.cur.execute(
++            """
++            SELECT t.category, COUNT(*)
+             FROM order_tests ot
++            JOIN tests t ON ot.test_id = t.id
+             JOIN orders o ON ot.order_id = o.id
+             WHERE (ot.deleted IS NULL OR ot.deleted=0)
+               AND (o.deleted IS NULL OR o.deleted=0)
+-        """)
+-        stats["total_tests_conducted"] = self.cur.fetchone()[0]
+-        self.cur.execute("""
+-            SELECT t.category, COUNT(*)
++        """
++            + (" AND datetime(o.date) BETWEEN datetime(?) AND datetime(?)" if tests_params else "") +
++            " GROUP BY t.category",
++            tests_params
++        )
++        stats["by_category"] = self.cur.fetchall()
++        self.cur.execute(
++            """
++            SELECT t.category, t.name, COUNT(*)
+             FROM order_tests ot
+             JOIN tests t ON ot.test_id = t.id
+             JOIN orders o ON ot.order_id = o.id
+             WHERE (ot.deleted IS NULL OR ot.deleted=0)
+               AND (o.deleted IS NULL OR o.deleted=0)
+-            GROUP BY t.category
+-        """)
+-        stats["by_category"] = self.cur.fetchall()
++        """
++            + (" AND datetime(o.date) BETWEEN datetime(?) AND datetime(?)" if tests_params else "") +
++            " GROUP BY t.category, t.name ORDER BY t.category, t.name",
++            tests_params
++        )
++        detail_rows = self.cur.fetchall()
++        detail = OrderedDict()
++        for category, test_name, count in detail_rows:
++            if category not in detail:
++                detail[category] = {"total": 0, "tests": []}
++            detail[category]["tests"].append((test_name, count))
++            detail[category]["total"] += count
++        stats["by_category_detail"] = detail
+         return stats
+     def get_results_in_range(self, start_datetime, end_datetime):
+         self.cur.execute(
+             """
+             SELECT ot.id, o.id, o.date, o.sample_date, p.first_name, p.last_name, p.doc_type, p.doc_number,
+                    p.sex, p.birth_date, p.hcl, p.origin, o.age_years, o.observations, o.insurance_type, o.fua_number,
+                    t.name, t.category, ot.result, ot.sample_status, ot.sample_issue, ot.observation
+             FROM order_tests ot
+             JOIN orders o ON ot.order_id = o.id
+             JOIN patients p ON o.patient_id = p.id
+             JOIN tests t ON ot.test_id = t.id
+             WHERE datetime(o.date) BETWEEN datetime(?) AND datetime(?)
+               AND (o.deleted IS NULL OR o.deleted=0)
+               AND (ot.deleted IS NULL OR ot.deleted=0)
+             ORDER BY datetime(o.date) ASC, o.id ASC, ot.id ASC
+             """,
+             (start_datetime, end_datetime)
+         )
+         return self.cur.fetchall()
+     def get_distinct_requesters(self):
+         self.cur.execute("SELECT DISTINCT requested_by FROM orders WHERE requested_by IS NOT NULL AND requested_by<>'' ORDER BY requested_by")
+         return [row[0] for row in self.cur.fetchall() if row[0]]
+     def _ensure_column_exists(self, table_name, column_name, column_type, default_value=None):
+         self.cur.execute(f"PRAGMA table_info({table_name})")
+         columns = [info[1] for info in self.cur.fetchall()]
