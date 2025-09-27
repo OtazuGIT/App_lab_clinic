@@ -4070,11 +4070,13 @@ class MainWindow(QMainWindow):
         self.view_activity_btn = QPushButton("Mostrar registro")
         self.export_activity_pdf_btn = QPushButton("Exportar PDF")
         self.export_activity_csv_btn = QPushButton("Exportar CSV")
+        self.export_activity_delivery_btn = QPushButton("Hoja de entrega")
         self.delete_activity_btn = QPushButton("Eliminar selección")
         self.delete_activity_btn.setStyleSheet("color: #c0392b;")
         controls_layout.addWidget(self.view_activity_btn)
         controls_layout.addWidget(self.export_activity_pdf_btn)
         controls_layout.addWidget(self.export_activity_csv_btn)
+        controls_layout.addWidget(self.export_activity_delivery_btn)
         controls_layout.addWidget(self.delete_activity_btn)
         controls_layout.addStretch()
         layout.addLayout(controls_layout)
@@ -4152,6 +4154,7 @@ class MainWindow(QMainWindow):
         self.view_activity_btn.clicked.connect(self.load_activity_summary)
         self.export_activity_pdf_btn.clicked.connect(lambda: self.export_activity_record("pdf"))
         self.export_activity_csv_btn.clicked.connect(lambda: self.export_activity_record("csv"))
+        self.export_activity_delivery_btn.clicked.connect(self.export_activity_delivery_sheet)
         self.delete_activity_btn.clicked.connect(self.delete_selected_activity_entries)
         self._update_range_controls()
         self._stats_controls_ready = True
@@ -4646,17 +4649,6 @@ class MainWindow(QMainWindow):
                 group_text(entry, "others")
             ]
             render_row(ordered_cells)
-        cache = getattr(self, '_activity_cache', {})
-        report_start = cache.get("start")
-        report_end = cache.get("end")
-        if report_start and report_end:
-            try:
-                start_date = report_start.date() if isinstance(report_start, datetime.datetime) else report_start
-                end_date = report_end.date() if isinstance(report_end, datetime.datetime) else report_end
-            except AttributeError:
-                start_date = end_date = None
-            if start_date and end_date and start_date == end_date:
-                self._append_delivery_sheet(pdf, aggregated, start_date)
         try:
             pdf.output(file_path)
         except Exception as exc:
@@ -4664,14 +4656,63 @@ class MainWindow(QMainWindow):
             return
         QMessageBox.information(self, "Exportado", f"Registro guardado en:\n{file_path}")
 
-    def _append_delivery_sheet(self, pdf, aggregated, report_date):
+    def export_activity_delivery_sheet(self):
+        if not getattr(self, '_activity_cache', None):
+            self.load_activity_summary()
+        cache = getattr(self, '_activity_cache', {"data": [], "start": None, "end": None})
+        data = cache.get("data", [])
+        if not data:
+            QMessageBox.information(self, "Sin datos", "No hay registros para el período seleccionado.")
+            return
+        aggregated = self._aggregate_results_by_order(data)
+        if not aggregated:
+            QMessageBox.information(self, "Sin datos", "No hay resultados con información para la hoja de entrega.")
+            return
+        report_start = cache.get("start")
+        report_end = cache.get("end")
+        try:
+            start_date = report_start.date() if isinstance(report_start, datetime.datetime) else report_start
+            end_date = report_end.date() if isinstance(report_end, datetime.datetime) else report_end
+        except AttributeError:
+            start_date = end_date = None
+        if not (start_date and end_date and start_date == end_date):
+            QMessageBox.information(
+                self,
+                "Rango no válido",
+                "La hoja de entrega solo se puede generar cuando el rango seleccionado corresponde a un único día."
+            )
+            return
+        base_date = start_date
+        default_path = self._ensure_output_directory("registros", "hoja_entrega.pdf")
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Exportar hoja de entrega",
+            default_path,
+            "Archivos PDF (*.pdf)"
+        )
+        if not file_path:
+            return
+        if not file_path.lower().endswith(".pdf"):
+            file_path += ".pdf"
+        pdf = FPDF('L', 'mm', 'A5')
+        pdf.set_margins(10, 14, 10)
+        pdf.set_auto_page_break(True, margin=12)
+        self._append_delivery_sheet(pdf, aggregated, base_date, page_format='A5')
+        try:
+            pdf.output(file_path)
+        except Exception as exc:
+            QMessageBox.warning(self, "Error", f"No se pudo generar la hoja de entrega:\n{exc}")
+            return
+        QMessageBox.information(self, "Exportado", f"Hoja de entrega guardada en:\n{file_path}")
+
+    def _append_delivery_sheet(self, pdf, aggregated, report_date, page_format='A4'):
         if not aggregated:
             return
         prev_left, prev_top, prev_right, prev_bottom = pdf.l_margin, pdf.t_margin, pdf.r_margin, pdf.b_margin
         prev_auto = pdf.auto_page_break
         pdf.set_margins(10, 14, 10)
         pdf.set_auto_page_break(True, margin=12)
-        self._add_pdf_page(pdf, orientation='L', page_format='A4')
+        self._add_pdf_page(pdf, orientation='L', page_format=page_format)
         pdf.set_font("Arial", 'B', 11)
         pdf.cell(0, 6, self._ensure_latin1("Entrega de resultados"), ln=1, align='C')
         base_date = report_date

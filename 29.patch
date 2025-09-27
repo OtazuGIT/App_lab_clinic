@@ -1,0 +1,250 @@
+diff --git a/main_window.py b/main_window.py
+index 8b5a15ead97938ad0b26437867915a46c7d789ac..83e03bf946335979ef7f2292e0bcbbf420938b40 100644
+--- a/main_window.py
++++ b/main_window.py
+@@ -4048,55 +4048,57 @@ class MainWindow(QMainWindow):
+         controls_layout.addWidget(QLabel("Período:"))
+         self.range_combo = QComboBox()
+         self.range_combo.addItems([
+             "Hoy",
+             "Esta semana",
+             "Este mes",
+             "Últimos 30 días",
+             "Rango personalizado"
+         ])
+         controls_layout.addWidget(self.range_combo)
+         controls_layout.addSpacing(10)
+         self.start_date_edit = QDateEdit(QDate.currentDate())
+         self.start_date_edit.setDisplayFormat("dd-MM-yyyy")
+         self.start_date_edit.setCalendarPopup(True)
+         controls_layout.addWidget(QLabel("Desde:"))
+         controls_layout.addWidget(self.start_date_edit)
+         self.end_date_edit = QDateEdit(QDate.currentDate())
+         self.end_date_edit.setDisplayFormat("dd-MM-yyyy")
+         self.end_date_edit.setCalendarPopup(True)
+         controls_layout.addWidget(QLabel("Hasta:"))
+         controls_layout.addWidget(self.end_date_edit)
+         controls_layout.addSpacing(10)
+         self.view_activity_btn = QPushButton("Mostrar registro")
+         self.export_activity_pdf_btn = QPushButton("Exportar PDF")
+         self.export_activity_csv_btn = QPushButton("Exportar CSV")
++        self.export_activity_delivery_btn = QPushButton("Hoja de entrega")
+         self.delete_activity_btn = QPushButton("Eliminar selección")
+         self.delete_activity_btn.setStyleSheet("color: #c0392b;")
+         controls_layout.addWidget(self.view_activity_btn)
+         controls_layout.addWidget(self.export_activity_pdf_btn)
+         controls_layout.addWidget(self.export_activity_csv_btn)
++        controls_layout.addWidget(self.export_activity_delivery_btn)
+         controls_layout.addWidget(self.delete_activity_btn)
+         controls_layout.addStretch()
+         layout.addLayout(controls_layout)
+         self.activity_caption = QLabel()
+         self.activity_caption.setStyleSheet("font-weight: bold;")
+         layout.addWidget(self.activity_caption)
+         self.activity_table = QTableWidget(0, 8)
+         self.activity_table.setHorizontalHeaderLabels([
+             "Fecha",
+             "Orden",
+             "Paciente",
+             "Documento",
+             "Edad",
+             "Prueba",
+             "Estado",
+             "Resultado"
+         ])
+         self.activity_table.setAlternatingRowColors(True)
+         self.activity_table.horizontalHeader().setStretchLastSection(True)
+         self.activity_table.setSelectionMode(QTableWidget.MultiSelection)
+         layout.addWidget(self.activity_table)
+         history_group = QGroupBox("Historial por DNI")
+         history_layout = QVBoxLayout(history_group)
+         history_search_layout = QHBoxLayout()
+         history_search_layout.addWidget(QLabel("DNI:"))
+diff --git a/main_window.py b/main_window.py
+index 8b5a15ead97938ad0b26437867915a46c7d789ac..83e03bf946335979ef7f2292e0bcbbf420938b40 100644
+--- a/main_window.py
++++ b/main_window.py
+@@ -4130,50 +4132,51 @@ class MainWindow(QMainWindow):
+             "Micro/Parasitología",
+             "Otros exámenes",
+             "Emitido"
+         ]
+         self.history_table = QTableWidget(0, len(history_headers))
+         self.history_table.setHorizontalHeaderLabels(history_headers)
+         self.history_table.setSelectionBehavior(QTableWidget.SelectRows)
+         self.history_table.setSelectionMode(QTableWidget.SingleSelection)
+         self.history_table.setAlternatingRowColors(True)
+         self.history_table.setWordWrap(True)
+         self.history_table.verticalHeader().setVisible(False)
+         self.history_table.horizontalHeader().setStretchLastSection(True)
+         self.history_column_map = {header: idx for idx, header in enumerate(history_headers)}
+         history_layout.addWidget(self.history_table)
+         layout.addWidget(history_group)
+         self._stats_controls_ready = False
+         self.stats_mode_combo.currentIndexChanged.connect(self._update_stats_period_controls)
+         self.stats_month_combo.currentIndexChanged.connect(lambda _: self.refresh_statistics())
+         self.stats_quarter_combo.currentIndexChanged.connect(lambda _: self.refresh_statistics())
+         self.stats_year_spin.valueChanged.connect(lambda _: self.refresh_statistics())
+         self._history_results = []
+         self.range_combo.currentIndexChanged.connect(self._update_range_controls)
+         self.view_activity_btn.clicked.connect(self.load_activity_summary)
+         self.export_activity_pdf_btn.clicked.connect(lambda: self.export_activity_record("pdf"))
+         self.export_activity_csv_btn.clicked.connect(lambda: self.export_activity_record("csv"))
++        self.export_activity_delivery_btn.clicked.connect(self.export_activity_delivery_sheet)
+         self.delete_activity_btn.clicked.connect(self.delete_selected_activity_entries)
+         self._update_range_controls()
+         self._stats_controls_ready = True
+         self._update_stats_period_controls()
+         self.history_doc_input.returnPressed.connect(self.search_patient_history)
+         self.history_search_btn.clicked.connect(self.search_patient_history)
+         self.history_open_btn.clicked.connect(self.open_history_order_from_analysis)
+         self.history_table.itemSelectionChanged.connect(self._on_history_selection_changed)
+         self.history_fua_btn.clicked.connect(self.edit_history_fua)
+     def refresh_statistics(self):
+         if not getattr(self, '_stats_controls_ready', False):
+             return
+         period = self._get_statistics_period()
+         start_dt = datetime.datetime.combine(period['start'], datetime.time(0, 0, 0))
+         end_dt = datetime.datetime.combine(period['end'], datetime.time(23, 59, 59))
+         stats = self.labdb.get_statistics(start_dt.isoformat(sep=' '), end_dt.isoformat(sep=' '))
+         summary_lines = [
+             f"Período: {period['label']}",
+             f"Pacientes atendidos: {stats['total_patients']}",
+             f"Órdenes realizadas: {stats['total_orders']}",
+             f"Pruebas realizadas: {stats['total_tests_conducted']}"
+         ]
+         self.stats_label.setText("\n".join(summary_lines))
+         self.stats_table.setRowCount(0)
+         detail = stats.get('by_category_detail', OrderedDict())
+diff --git a/main_window.py b/main_window.py
+index 8b5a15ead97938ad0b26437867915a46c7d789ac..83e03bf946335979ef7f2292e0bcbbf420938b40 100644
+--- a/main_window.py
++++ b/main_window.py
+@@ -4624,76 +4627,114 @@ class MainWindow(QMainWindow):
+                 pdf.rect(x_pos, y_start, cell_width, row_height)
+                 text_y = y_start + padding_y
+                 for line in lines:
+                     pdf.set_xy(x_pos + padding_x, text_y)
+                     pdf.cell(cell_width - 2 * padding_x, line_height, line, border=0)
+                     text_y += line_height
+             pdf.set_xy(pdf.l_margin, y_start + row_height)
+ 
+         draw_header()
+ 
+         def group_text(entry, key):
+             values = entry.get("groups", {}).get(key, [])
+             cleaned = [" ".join(str(val).split()) for val in values if str(val).strip()]
+             return "\n".join(cleaned) if cleaned else "-"
+ 
+         for entry in aggregated:
+             ordered_cells = [
+                 self._format_date_for_registry(entry),
+                 self._format_patient_block_for_registry(entry),
+                 group_text(entry, "hematology"),
+                 group_text(entry, "biochemistry"),
+                 group_text(entry, "micro_parasito"),
+                 group_text(entry, "others")
+             ]
+             render_row(ordered_cells)
+-        cache = getattr(self, '_activity_cache', {})
+-        report_start = cache.get("start")
+-        report_end = cache.get("end")
+-        if report_start and report_end:
+-            try:
+-                start_date = report_start.date() if isinstance(report_start, datetime.datetime) else report_start
+-                end_date = report_end.date() if isinstance(report_end, datetime.datetime) else report_end
+-            except AttributeError:
+-                start_date = end_date = None
+-            if start_date and end_date and start_date == end_date:
+-                self._append_delivery_sheet(pdf, aggregated, start_date)
+         try:
+             pdf.output(file_path)
+         except Exception as exc:
+             QMessageBox.warning(self, "Error", f"No se pudo generar el PDF:\n{exc}")
+             return
+         QMessageBox.information(self, "Exportado", f"Registro guardado en:\n{file_path}")
+ 
+-    def _append_delivery_sheet(self, pdf, aggregated, report_date):
++    def export_activity_delivery_sheet(self):
++        if not getattr(self, '_activity_cache', None):
++            self.load_activity_summary()
++        cache = getattr(self, '_activity_cache', {"data": [], "start": None, "end": None})
++        data = cache.get("data", [])
++        if not data:
++            QMessageBox.information(self, "Sin datos", "No hay registros para el período seleccionado.")
++            return
++        aggregated = self._aggregate_results_by_order(data)
++        if not aggregated:
++            QMessageBox.information(self, "Sin datos", "No hay resultados con información para la hoja de entrega.")
++            return
++        report_start = cache.get("start")
++        report_end = cache.get("end")
++        try:
++            start_date = report_start.date() if isinstance(report_start, datetime.datetime) else report_start
++            end_date = report_end.date() if isinstance(report_end, datetime.datetime) else report_end
++        except AttributeError:
++            start_date = end_date = None
++        if not (start_date and end_date and start_date == end_date):
++            QMessageBox.information(
++                self,
++                "Rango no válido",
++                "La hoja de entrega solo se puede generar cuando el rango seleccionado corresponde a un único día."
++            )
++            return
++        base_date = start_date
++        default_path = self._ensure_output_directory("registros", "hoja_entrega.pdf")
++        file_path, _ = QFileDialog.getSaveFileName(
++            self,
++            "Exportar hoja de entrega",
++            default_path,
++            "Archivos PDF (*.pdf)"
++        )
++        if not file_path:
++            return
++        if not file_path.lower().endswith(".pdf"):
++            file_path += ".pdf"
++        pdf = FPDF('L', 'mm', 'A5')
++        pdf.set_margins(10, 14, 10)
++        pdf.set_auto_page_break(True, margin=12)
++        self._append_delivery_sheet(pdf, aggregated, base_date, page_format='A5')
++        try:
++            pdf.output(file_path)
++        except Exception as exc:
++            QMessageBox.warning(self, "Error", f"No se pudo generar la hoja de entrega:\n{exc}")
++            return
++        QMessageBox.information(self, "Exportado", f"Hoja de entrega guardada en:\n{file_path}")
++
++    def _append_delivery_sheet(self, pdf, aggregated, report_date, page_format='A4'):
+         if not aggregated:
+             return
+         prev_left, prev_top, prev_right, prev_bottom = pdf.l_margin, pdf.t_margin, pdf.r_margin, pdf.b_margin
+         prev_auto = pdf.auto_page_break
+         pdf.set_margins(10, 14, 10)
+         pdf.set_auto_page_break(True, margin=12)
+-        self._add_pdf_page(pdf, orientation='L', page_format='A4')
++        self._add_pdf_page(pdf, orientation='L', page_format=page_format)
+         pdf.set_font("Arial", 'B', 11)
+         pdf.cell(0, 6, self._ensure_latin1("Entrega de resultados"), ln=1, align='C')
+         base_date = report_date
+         if isinstance(base_date, datetime.datetime):
+             base_date = base_date.date()
+         if not base_date:
+             base_date = datetime.date.today()
+         pdf.set_font("Arial", '', 9)
+         pdf.cell(
+             0,
+             5,
+             self._ensure_latin1(f"Listado de pacientes - {base_date.strftime('%d/%m/%Y')}"),
+             ln=1,
+             align='C'
+         )
+         pdf.ln(1.5)
+         available_width = max(pdf.w - pdf.l_margin - pdf.r_margin, 0)
+         columns = [
+             {"title": "Fecha de entrega", "ratio": 0.16, "min_lines": 1},
+             {"title": "Paciente", "ratio": 0.22, "min_lines": 2},
+             {"title": "Pruebas entregadas", "ratio": 0.26, "min_lines": 2},
+             {"title": "Entregado por", "ratio": 0.16, "min_lines": 2},
+             {"title": "Personal que recibe / Observaciones", "ratio": 0.20, "min_lines": 3},
+         ]
+         column_widths = [
