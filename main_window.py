@@ -2429,7 +2429,13 @@ class MainWindow(QMainWindow):
     def _add_pdf_page(self, pdf, orientation=None, page_format=None):
         """Compatibilidad para agregar páginas en diferentes versiones de FPDF."""
 
-        attempts = []
+        attempts = [
+            ((), {}),  # Compatibilidad con versiones antiguas que no aceptan argumentos.
+        ]
+
+        if orientation:
+            # Intentos sin argumentos de formato para FPDF heredado.
+            attempts.append(((orientation,), {}))
 
         base_kwargs = {}
         if orientation:
