@@ -1,6 +1,7 @@
 # main_window.py
 import copy
 import datetime
+import inspect
 import json
 import os
 import re
@@ -2427,18 +2428,29 @@ class MainWindow(QMainWindow):
 
     def _add_pdf_page(self, pdf, orientation=None, page_format=None):
         """Compatibilidad para agregar páginas en diferentes versiones de FPDF."""
-        kwargs = {}
-        if orientation:
-            kwargs["orientation"] = orientation
-        if page_format is not None:
-            kwargs["format"] = page_format
         try:
-            pdf.add_page(**kwargs)
-        except TypeError:
-            if page_format is not None:
-                kwargs.pop("format", None)
+            params = inspect.signature(pdf.add_page).parameters
+        except (TypeError, ValueError):
+            params = {}
+
+        args = []
+        kwargs = {}
+
+        if orientation:
+            if "orientation" in params:
+                kwargs["orientation"] = orientation
+            else:
+                args.append(orientation)
+
+        if page_format is not None:
+            if "format" in params:
+                kwargs["format"] = page_format
+            elif "size" in params:
                 kwargs["size"] = page_format
-            pdf.add_page(**kwargs)
+            else:
+                args.append(page_format)
+
+        pdf.add_page(*args, **kwargs)
 
     def _ensure_latin1(self, text):
         if text is None:

@@ -1,0 +1,120 @@
+diff --git a/main_window.py b/main_window.py
+index b68df2c79f6b03c67b7efabf284a64b70748f477..3d99a34a402cf22ad5abd789eb642d31c832e075 100644
+--- a/main_window.py
++++ b/main_window.py
+@@ -1,28 +1,29 @@
+ # main_window.py
+ import copy
+ import datetime
++import inspect
+ import json
+ import os
+ import re
+ import unicodedata
+ from collections import OrderedDict
+ from PyQt5.QtWidgets import (QMainWindow, QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout,
+                              QStackedWidget, QFormLayout, QScrollArea, QGroupBox, QComboBox,
+                              QLineEdit, QTextEdit, QTableWidget, QTableWidgetItem, QFileDialog, QMessageBox, QCheckBox,
+                              QDateEdit, QRadioButton, QButtonGroup, QDialog, QDialogButtonBox, QListWidget, QListWidgetItem,
+                              QSpinBox, QInputDialog)
+ from PyQt5.QtCore import QDate, QDateTime, Qt, QTimer
+ from fpdf import FPDF  # Asegúrese de tener fpdf instalado (pip install fpdf)
+ 
+ LAB_TITLE = "Laboratorio P.S. Iñapari - 002789"
+ 
+ REGISTRY_ABBREVIATIONS = {
+     "hematocrito": "Hto",
+     "hematocrito (hto)": "Hto",
+     "hemoglobina": "Hb",
+     "hemoglobina (hb)": "Hb",
+     "hemoglobina - hematocrito": "Hb/Hto",
+     "hemoglobina hematocrito": "Hb/Hto",
+     "leucocitos": "Leu",
+     "leucocitos totales": "Leu",
+     "recuento de leucocitos": "Leu",
+diff --git a/main_window.py b/main_window.py
+index b68df2c79f6b03c67b7efabf284a64b70748f477..3d99a34a402cf22ad5abd789eb642d31c832e075 100644
+--- a/main_window.py
++++ b/main_window.py
+@@ -2405,62 +2406,73 @@ class MainWindow(QMainWindow):
+             widget = field_info.get("widget")
+             return widget.text().strip() if widget else ""
+         if field_type == "text_area":
+             widget = field_info.get("widget")
+             return widget.toPlainText().strip() if widget else ""
+         if field_type == "combo":
+             widget = field_info.get("widget")
+             return widget.currentText().strip() if widget else ""
+         if field_type == "bool":
+             if field_info.get("positive") and field_info["positive"].isChecked():
+                 return field_info.get("positive_text", "Positivo")
+             if field_info.get("negative") and field_info["negative"].isChecked():
+                 return field_info.get("negative_text", "Negativo")
+             return ""
+         return ""
+     def _to_float(self, text):
+         if text in (None, ""):
+             return None
+         try:
+             return float(str(text).replace(',', '.'))
+         except ValueError:
+             return None
+ 
+     def _add_pdf_page(self, pdf, orientation=None, page_format=None):
+         """Compatibilidad para agregar páginas en diferentes versiones de FPDF."""
++        try:
++            params = inspect.signature(pdf.add_page).parameters
++        except (TypeError, ValueError):
++            params = {}
++
++        args = []
+         kwargs = {}
++
+         if orientation:
+-            kwargs["orientation"] = orientation
++            if "orientation" in params:
++                kwargs["orientation"] = orientation
++            else:
++                args.append(orientation)
++
+         if page_format is not None:
+-            kwargs["format"] = page_format
+-        try:
+-            pdf.add_page(**kwargs)
+-        except TypeError:
+-            if page_format is not None:
+-                kwargs.pop("format", None)
++            if "format" in params:
++                kwargs["format"] = page_format
++            elif "size" in params:
+                 kwargs["size"] = page_format
+-            pdf.add_page(**kwargs)
++            else:
++                args.append(page_format)
++
++        pdf.add_page(*args, **kwargs)
+ 
+     def _ensure_latin1(self, text):
+         if text is None:
+             return ""
+         if not isinstance(text, str):
+             text = str(text)
+         replacements = {
+             '\u2013': '-',
+             '\u2014': '-',
+             '\u2018': "'",
+             '\u2019': "'",
+             '\u201c': '"',
+             '\u201d': '"'
+         }
+         for bad, good in replacements.items():
+             text = text.replace(bad, good)
+         try:
+             text.encode('latin-1')
+             return text
+         except UnicodeEncodeError:
+             return text.encode('latin-1', 'replace').decode('latin-1')
+ 
+     def _is_blank_result(self, value):
+         if value is None:
+             return True
