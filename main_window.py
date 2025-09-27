@@ -2448,6 +2448,12 @@ class MainWindow(QMainWindow):
             elif "size" in params:
                 kwargs["size"] = page_format
             else:
+                # If we already plan to pass the orientation as a keyword argument
+                # but the FPDF version expects positional parameters, convert the
+                # orientation argument back to positional so that the page format can
+                # occupy the second positional slot without conflicting.
+                if "orientation" in kwargs and not args:
+                    args.append(kwargs.pop("orientation"))
                 args.append(page_format)
 
         pdf.add_page(*args, **kwargs)
