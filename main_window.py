@@ -3335,12 +3335,7 @@ class MainWindow(QMainWindow):
         lines.append(f"HISTORIA CLÍNICA: {pat.get('hcl') or '-'}")
         lines.append(f"PROCEDENCIA: {pat.get('origin') or '-'}")
         insurance_display = self._format_insurance_display(ord_inf.get('insurance_type'))
-        fua_display = self._format_fua_display({
-            "insurance_type": ord_inf.get('insurance_type'),
-            "fua_number": ord_inf.get('fua_number')
-        })
         lines.append(f"SEGURO: {insurance_display}")
-        lines.append(f"FUA: {fua_display}")
         requester = ord_inf.get('requested_by') or '-'
         lines.append(f"SOLICITANTE: {requester}")
         emission_raw = ord_inf.get('emitted_at')
@@ -3465,7 +3460,6 @@ class MainWindow(QMainWindow):
         hcl_text = (pat.get('hcl') or '-').upper()
         origin_text = (pat.get('origin') or '-').upper()
         requester_text = (ord_inf.get('requested_by') or '-').upper()
-        diagnosis_text = (ord_inf.get('diagnosis') or '-').upper()
         header_image_path = os.path.join("img", "img.png")
         pregnancy_flag = pat.get('is_pregnant')
         gest_weeks = pat.get('gestational_age_weeks')
@@ -3500,17 +3494,12 @@ class MainWindow(QMainWindow):
         if not print_display:
             print_display = emission_display
         insurance_display = self._format_insurance_display(ord_inf.get('insurance_type'))
-        fua_display = self._format_fua_display({
-            "insurance_type": ord_inf.get('insurance_type'),
-            "fua_number": ord_inf.get('fua_number')
-        })
         info_pairs = [
             (("Paciente", patient_name), ("Edad", age_text)),
             (("Documento", doc_text.upper() if doc_text else "-"), ("Sexo", sex_text)),
-            (("Seguro", insurance_display), ("FUA", fua_display)),
-            (("Historia clínica", hcl_text), ("Fecha del informe", emission_display)),
-            (("Procedencia", origin_text), ("Fecha de toma de muestra", sample_date_display)),
-            (("Solicitante", requester_text), ("Diagnóstico", diagnosis_text)),
+            (("Seguro", insurance_display), ("Historia clínica", hcl_text)),
+            (("Procedencia", origin_text), ("Fecha del informe", emission_display)),
+            (("Solicitante", requester_text), ("Fecha de toma de muestra", sample_date_display)),
         ]
         if pregnancy_text:
             info_pairs.append((("Gestante", pregnancy_text), ("FPP", due_display)))

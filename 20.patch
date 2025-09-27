@@ -1,0 +1,165 @@
+diff --git a/main_window.py b/main_window.py
+index 1e2ddbcd60ba3fff2987df24ad59d0e6a6639a52..1f78f357295c908b8c0d1a69dfe17d8f1cc79f7e 100644
+--- a/main_window.py
++++ b/main_window.py
+@@ -3313,56 +3313,51 @@ class MainWindow(QMainWindow):
+         pregnancy_flag = pat.get('is_pregnant')
+         gest_weeks = pat.get('gestational_age_weeks')
+         due_raw = pat.get('expected_delivery_date')
+         if pregnancy_flag or due_raw or gest_weeks not in (None, ''):
+             if pregnancy_flag:
+                 weeks_text = ''
+                 if gest_weeks not in (None, '', 0):
+                     try:
+                         weeks_text = f"{int(gest_weeks)} SEMANAS"
+                     except (TypeError, ValueError):
+                         weeks_text = ''
+                 line = 'GESTANTE: SÍ'
+                 if weeks_text:
+                     line += f" ({weeks_text})"
+             else:
+                 line = 'GESTANTE: NO'
+             lines.append(line)
+             if due_raw:
+                 due_display = self._format_short_date(due_raw)
+                 if due_display == '—':
+                     due_display = due_raw
+                 lines.append(f"FPP: {due_display}")
+         lines.append(f"HISTORIA CLÍNICA: {pat.get('hcl') or '-'}")
+         lines.append(f"PROCEDENCIA: {pat.get('origin') or '-'}")
+         insurance_display = self._format_insurance_display(ord_inf.get('insurance_type'))
+-        fua_display = self._format_fua_display({
+-            "insurance_type": ord_inf.get('insurance_type'),
+-            "fua_number": ord_inf.get('fua_number')
+-        })
+         lines.append(f"SEGURO: {insurance_display}")
+-        lines.append(f"FUA: {fua_display}")
+         requester = ord_inf.get('requested_by') or '-'
+         lines.append(f"SOLICITANTE: {requester}")
+         emission_raw = ord_inf.get('emitted_at')
+         if emission_raw:
+             try:
+                 emission_dt = datetime.datetime.strptime(emission_raw, "%Y-%m-%d %H:%M:%S")
+                 emission_display = emission_dt.strftime("%d/%m/%Y %H:%M")
+             except Exception:
+                 emission_display = emission_raw
+         else:
+             emission_display = "Pendiente de emisión"
+         lines.append(f"FECHA DEL INFORME: {emission_display}")
+         sample_raw = ord_inf.get('sample_date')
+         if sample_raw:
+             try:
+                 sample_dt = datetime.datetime.strptime(sample_raw, "%Y-%m-%d")
+                 sample_display = sample_dt.strftime("%d/%m/%Y")
+             except Exception:
+                 sample_display = sample_raw
+         else:
+             sample_display = "-"
+         lines.append(f"FECHA DE TOMA DE MUESTRA: {sample_display}")
+         lines.append("RESULTADOS:")
+         for test_name, raw_result, _, sample_status, sample_issue, observation, _ in results:
+             formatted_lines = self._format_result_lines(test_name, raw_result, context=context)
+diff --git a/main_window.py b/main_window.py
+index 1e2ddbcd60ba3fff2987df24ad59d0e6a6639a52..1f78f357295c908b8c0d1a69dfe17d8f1cc79f7e 100644
+--- a/main_window.py
++++ b/main_window.py
+@@ -3443,96 +3438,90 @@ class MainWindow(QMainWindow):
+             is_copy=is_copy
+         )
+         try:
+             pdf.output(file_path)
+         except Exception as exc:
+             QMessageBox.warning(self, "Error", f"No se pudo guardar el PDF:\n{exc}")
+             return
+         if mark_as_emitted:
+             self.labdb.mark_order_emitted(order_id, emission_timestamp)
+         QMessageBox.information(self, "Informe emitido", f"Reporte guardado en:\n{file_path}")
+         self.populate_completed_orders()
+         self.output_text.clear()
+ 
+     def _render_order_pdf(self, pdf, info, emission_display, print_display=None, is_copy=False):
+         pat = info["patient"]
+         ord_inf = info["order"]
+         results = info["results"]
+         context = {"patient": pat, "order": ord_inf}
+         doc_text = " ".join([part for part in (pat.get('doc_type'), pat.get('doc_number')) if part]) or "-"
+         patient_name = (pat.get('name') or '-').upper()
+         age_text = self._format_age_text(pat, ord_inf)
+         sex_text = (pat.get('sex') or '-').upper()
+         hcl_text = (pat.get('hcl') or '-').upper()
+         origin_text = (pat.get('origin') or '-').upper()
+         requester_text = (ord_inf.get('requested_by') or '-').upper()
+-        diagnosis_text = (ord_inf.get('diagnosis') or '-').upper()
+         header_image_path = os.path.join("img", "img.png")
+         pregnancy_flag = pat.get('is_pregnant')
+         gest_weeks = pat.get('gestational_age_weeks')
+         due_raw = pat.get('expected_delivery_date')
+         due_display = '-'
+         if due_raw:
+             due_display = self._format_short_date(due_raw)
+             if due_display == '—':
+                 due_display = due_raw
+         pregnancy_text = None
+         if pregnancy_flag or due_raw or gest_weeks not in (None, ''):
+             if pregnancy_flag:
+                 weeks_text = ''
+                 if gest_weeks not in (None, '', 0):
+                     try:
+                         weeks_text = f"{int(gest_weeks)} sem"
+                     except (TypeError, ValueError):
+                         weeks_text = ''
+                 pregnancy_text = 'Sí'
+                 if weeks_text:
+                     pregnancy_text = f"{pregnancy_text} ({weeks_text})"
+             else:
+                 pregnancy_text = 'No'
+         sample_date_raw = ord_inf.get('sample_date')
+         sample_date_display = '-'
+         if sample_date_raw:
+             try:
+                 sample_dt = datetime.datetime.strptime(sample_date_raw, "%Y-%m-%d")
+                 sample_date_display = sample_dt.strftime("%d/%m/%Y")
+             except Exception:
+                 sample_date_display = sample_date_raw
+         if not print_display:
+             print_display = emission_display
+         insurance_display = self._format_insurance_display(ord_inf.get('insurance_type'))
+-        fua_display = self._format_fua_display({
+-            "insurance_type": ord_inf.get('insurance_type'),
+-            "fua_number": ord_inf.get('fua_number')
+-        })
+         info_pairs = [
+             (("Paciente", patient_name), ("Edad", age_text)),
+             (("Documento", doc_text.upper() if doc_text else "-"), ("Sexo", sex_text)),
+-            (("Seguro", insurance_display), ("FUA", fua_display)),
+-            (("Historia clínica", hcl_text), ("Fecha del informe", emission_display)),
+-            (("Procedencia", origin_text), ("Fecha de toma de muestra", sample_date_display)),
+-            (("Solicitante", requester_text), ("Diagnóstico", diagnosis_text)),
++            (("Seguro", insurance_display), ("Historia clínica", hcl_text)),
++            (("Procedencia", origin_text), ("Fecha del informe", emission_display)),
++            (("Solicitante", requester_text), ("Fecha de toma de muestra", sample_date_display)),
+         ]
+         if pregnancy_text:
+             info_pairs.append((("Gestante", pregnancy_text), ("FPP", due_display)))
+ 
+         def draw_patient_info():
+             col_width = (pdf.w - pdf.l_margin - pdf.r_margin) / 2
+ 
+             def wrap_value_lines(text, width):
+                 safe_value = str(text) if text not in (None, "") else "-"
+                 safe_value = self._ensure_latin1(safe_value)
+                 segments = []
+                 for part in safe_value.split('\n'):
+                     part = part.strip()
+                     if part:
+                         segments.append(part)
+                 if not segments:
+                     segments = [safe_value.strip() or "-"]
+                 lines = []
+                 for segment in segments:
+                     words = segment.split()
+                     if not words:
+                         lines.append("-")
+                         continue
+                     current = words[0]
+                     for word in words[1:]:
