@@ -1413,6 +1413,16 @@ class MainWindow(QMainWindow):
         tests_scroll = QScrollArea(); tests_scroll.setWidgetResizable(True)
         tests_container = QWidget(); tests_layout = QVBoxLayout(tests_container)
         self.test_checkboxes = []
+        tests_controls_layout = QHBoxLayout()
+        self.test_selection_count_label = QLabel("Pruebas seleccionadas: 0")
+        self.test_selection_count_label.setStyleSheet("font-weight: bold;")
+        tests_controls_layout.addWidget(self.test_selection_count_label)
+        tests_controls_layout.addStretch()
+        self.clear_tests_button = QPushButton("Borrar todas las pruebas")
+        self.clear_tests_button.setToolTip("Desmarca todas las pruebas seleccionadas")
+        self.clear_tests_button.clicked.connect(self.clear_selected_tests)
+        tests_controls_layout.addWidget(self.clear_tests_button)
+        tests_layout.addLayout(tests_controls_layout)
         # Obtener pruebas agrupadas por categoría de la BD
         categories = {}
         self.labdb.cur.execute("SELECT category, name FROM tests")
@@ -1425,12 +1435,14 @@ class MainWindow(QMainWindow):
                 cb = QCheckBox(test_name)
                 group_layout.addWidget(cb)
                 self.test_checkboxes.append(cb)
+                cb.toggled.connect(self.update_test_selection_count)
             group_box.setLayout(group_layout)
             tests_layout.addWidget(group_box)
         tests_layout.addStretch()
         tests_scroll.setWidget(tests_container)
         top_layout.addWidget(tests_scroll)
         layout.addLayout(top_layout)
+        self.update_test_selection_count()
         # Botones de acción
         btn_register = QPushButton("Registrar paciente y pruebas")
         btn_new = QPushButton("Registrar nuevo paciente")
@@ -1469,6 +1481,20 @@ class MainWindow(QMainWindow):
             else:
                 self.input_requested_by.lineEdit().setText(self.input_requested_by.currentText())
             self.input_requested_by.lineEdit().setPlaceholderText("Seleccione o escriba el médico solicitante")
+
+    def update_test_selection_count(self):
+        count = sum(1 for cb in getattr(self, 'test_checkboxes', []) if cb.isChecked())
+        if hasattr(self, 'test_selection_count_label'):
+            self.test_selection_count_label.setText(f"Pruebas seleccionadas: {count}")
+        if hasattr(self, 'clear_tests_button'):
+            self.clear_tests_button.setEnabled(count > 0)
+
+    def clear_selected_tests(self):
+        for cb in getattr(self, 'test_checkboxes', []):
+            cb.blockSignals(True)
+            cb.setChecked(False)
+            cb.blockSignals(False)
+        self.update_test_selection_count()
     def update_age_from_birth_date(self, qdate=None):
         if qdate is None:
             qdate = self.input_birth_date.date()
@@ -1749,6 +1775,7 @@ class MainWindow(QMainWindow):
         for cb in getattr(self, 'test_checkboxes', []):
             cb.setChecked(False)
         self.update_pregnancy_visibility()
+        self.update_test_selection_count()
 
     def go_to_results(self):
         # Navegar a la página de resultados para la última orden registrada
@@ -2846,6 +2873,9 @@ class MainWindow(QMainWindow):
                     "hcl": record.get("hcl"),
                     "sex": record.get("sex"),
                     "origin": record.get("origin"),
+                    "is_pregnant": record.get("is_pregnant"),
+                    "gestational_age_weeks": record.get("gestational_age_weeks"),
+                    "expected_delivery_date": record.get("expected_delivery_date"),
                     "age": record.get("age", ""),
                     "first_name": record.get("first_name"),
                     "last_name": record.get("last_name"),
@@ -2920,7 +2950,14 @@ class MainWindow(QMainWindow):
         birth_line = f"F. Nac.: {self._format_short_date(entry.get('birth_date'))}"
         hcl_value = clean(entry.get("hcl")) or "—"
         hcl_line = f"HCL: {hcl_value}"
-        return "\n".join([name_line or "—", doc_line, birth_line, hcl_line])
+        lines = [name_line or "—", doc_line, birth_line, hcl_line]
+        insurance_display = self._format_insurance_display(entry.get("insurance_type"))
+        if insurance_display:
+            lines.append(f"Seguro: {insurance_display}")
+        pregnancy_line = self._format_registry_pregnancy_line(entry)
+        if pregnancy_line:
+            lines.append(pregnancy_line)
+        return "\n".join(lines)
 
     def _format_date_for_registry(self, entry):
         sample = entry.get("sample_date_raw")
@@ -2967,6 +3004,37 @@ class MainWindow(QMainWindow):
         if not insurance_value:
             return "SIS"
         return str(insurance_value).strip().upper() or "SIS"
+
+    def _normalize_bool(self, value):
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return value != 0
+        if isinstance(value, str):
+            normalized = unicodedata.normalize("NFD", value.strip().lower())
+            normalized = "".join(ch for ch in normalized if unicodedata.category(ch) != 'Mn')
+            return normalized in {"1", "true", "t", "si", "s", "y", "yes"}
+        return False
+
+    def _format_registry_pregnancy_line(self, entry):
+        is_pregnant = self._normalize_bool(entry.get("is_pregnant"))
+        if not is_pregnant:
+            return None
+        gest_weeks = entry.get("gestational_age_weeks")
+        due_raw = entry.get("expected_delivery_date")
+        display = "Gestante: Sí"
+        if gest_weeks not in (None, "", 0):
+            try:
+                display += f" ({int(gest_weeks)} sem)"
+            except (TypeError, ValueError):
+                pass
+        if due_raw:
+            due_display = self._format_short_date(due_raw)
+            if due_display == "—":
+                due_display = str(due_raw)
+            if due_display:
+                display += f" - FPP: {due_display}"
+        return display
 
     def _format_fua_display(self, entry):
         insurance = (entry.get("insurance_type") or "").strip().lower()
@@ -4331,6 +4399,9 @@ class MainWindow(QMainWindow):
             birth_date,
             hcl,
             origin,
+            is_pregnant,
+            gest_age_weeks,
+            expected_delivery,
             age_years,
             order_obs,
             insurance_type,
@@ -4380,6 +4451,9 @@ class MainWindow(QMainWindow):
                 "hcl": hcl,
                 "sex": sex,
                 "origin": origin,
+                "is_pregnant": is_pregnant,
+                "gestational_age_weeks": gest_age_weeks,
+                "expected_delivery_date": expected_delivery,
                 "age": age_display,
                 "test": test_name,
                 "result": result_text,

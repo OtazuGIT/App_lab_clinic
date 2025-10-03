@@ -720,7 +720,8 @@ class LabDB:
         self.cur.execute(
             """
             SELECT ot.id, o.id, o.date, o.sample_date, p.first_name, p.last_name, p.doc_type, p.doc_number,
-                   p.sex, p.birth_date, p.hcl, p.origin, o.age_years, o.observations, o.insurance_type, o.fua_number,
+                   p.sex, p.birth_date, p.hcl, p.origin, p.is_pregnant, p.gestational_age_weeks, p.expected_delivery_date,
+                   o.age_years, o.observations, o.insurance_type, o.fua_number,
                    t.name, t.category, ot.result, ot.sample_status, ot.sample_issue, ot.observation
             FROM order_tests ot
             JOIN orders o ON ot.order_id = o.id
