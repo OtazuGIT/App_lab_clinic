@@ -1445,29 +1445,46 @@ class MainWindow(QMainWindow):
 
         top_layout = QHBoxLayout()
         top_layout.setSpacing(24)
-        # Formulario de datos del paciente
-        form_layout = QFormLayout()
-        form_layout.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        form_layout.setFormAlignment(Qt.AlignTop)
+        # Formulario de datos del paciente con dos columnas para reducir el scroll
+        form_container = QWidget()
+        form_grid = QGridLayout(form_container)
+        form_grid.setContentsMargins(0, 0, 0, 0)
+        form_grid.setHorizontalSpacing(20)
+        form_grid.setVerticalSpacing(12)
+        form_grid.setColumnStretch(0, 0)
+        form_grid.setColumnStretch(1, 1)
+        form_grid.setColumnStretch(2, 0)
+        form_grid.setColumnStretch(3, 1)
+
+        def add_form_row(row, column, label_text, widget):
+            label = QLabel(label_text)
+            label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            form_grid.addWidget(label, row, column * 2)
+            form_grid.addWidget(widget, row, column * 2 + 1)
+
+        left_row = 0
+        right_row = 0
         self.input_doc_type = QComboBox(); self.input_doc_type.addItems(["DNI", "Carnet Ext.", "Pasaporte"])
         self.input_doc_number = QLineEdit()
         btn_search = QPushButton("Buscar"); btn_search.setFixedWidth(60)
         btn_search.clicked.connect(self.autofill_patient)
         doc_hlayout = QHBoxLayout()
+        doc_hlayout.setContentsMargins(0, 0, 0, 0)
         doc_hlayout.addWidget(self.input_doc_type); doc_hlayout.addWidget(self.input_doc_number); doc_hlayout.addWidget(btn_search)
-        form_layout.addRow("Documento:", doc_hlayout)
-        self.input_first_name = QLineEdit(); form_layout.addRow("Nombre:", self.input_first_name)
-        self.input_last_name = QLineEdit(); form_layout.addRow("Apellidos:", self.input_last_name)
+        doc_widget = QWidget(); doc_widget.setLayout(doc_hlayout)
+        add_form_row(left_row, 0, "Documento:", doc_widget); left_row += 1
+        self.input_first_name = QLineEdit(); add_form_row(left_row, 0, "Nombre:", self.input_first_name); left_row += 1
+        self.input_last_name = QLineEdit(); add_form_row(left_row, 0, "Apellidos:", self.input_last_name); left_row += 1
         # Fecha de nacimiento y edad calculada automáticamente (editable)
         self.input_birth_date = QDateEdit()
         self.input_birth_date.setDisplayFormat("dd/MM/yyyy")
         self.input_birth_date.setCalendarPopup(True)
         self.input_birth_date.setDate(QDate.currentDate())
         self.input_birth_date.dateChanged.connect(self.update_age_from_birth_date)
-        form_layout.addRow("F. Nacimiento:", self.input_birth_date)
+        add_form_row(left_row, 0, "F. Nacimiento:", self.input_birth_date); left_row += 1
         self.input_age = QLineEdit()
         self.input_age.setPlaceholderText("Edad estimada")
-        form_layout.addRow("Edad:", self.input_age)
+        add_form_row(left_row, 0, "Edad:", self.input_age); left_row += 1
         # Sexo como botones exclusivos
         self.sex_male_radio = QRadioButton("Masculino")
         self.sex_female_radio = QRadioButton("Femenino")
@@ -1478,13 +1495,15 @@ class MainWindow(QMainWindow):
         self.sex_male_radio.toggled.connect(self.update_pregnancy_visibility)
         self.sex_female_radio.toggled.connect(self.update_pregnancy_visibility)
         sex_layout = QHBoxLayout()
+        sex_layout.setContentsMargins(0, 0, 0, 0)
         sex_layout.addWidget(self.sex_male_radio)
         sex_layout.addWidget(self.sex_female_radio)
         sex_layout.addStretch()
-        form_layout.addRow("Sexo:", sex_layout)
+        sex_widget = QWidget(); sex_widget.setLayout(sex_layout)
+        add_form_row(left_row, 0, "Sexo:", sex_widget); left_row += 1
         self.insurance_combo = QComboBox()
         self.insurance_combo.addItems(["SIS", "Particular"])
-        form_layout.addRow("Tipo de seguro:", self.insurance_combo)
+        add_form_row(left_row, 0, "Tipo de seguro:", self.insurance_combo); left_row += 1
         self.pregnancy_checkbox = QCheckBox("Paciente gestante")
         self.pregnancy_checkbox.stateChanged.connect(self.on_pregnancy_toggle)
         self.gestational_weeks_spin = QSpinBox()
@@ -1506,7 +1525,7 @@ class MainWindow(QMainWindow):
         pregnancy_layout.addWidget(QLabel("FPP:"))
         pregnancy_layout.addWidget(self.expected_delivery_date)
         pregnancy_layout.addStretch()
-        form_layout.addRow("Gestación:", self.pregnancy_container)
+        add_form_row(left_row, 0, "Gestación:", self.pregnancy_container); left_row += 1
         self.update_pregnancy_visibility()
         # Procedencia con opción rápida P.S Iñapari u otros
         self.origin_combo = QComboBox()
@@ -1516,28 +1535,32 @@ class MainWindow(QMainWindow):
         self.input_origin_other.setPlaceholderText("Especifique procedencia")
         self.input_origin_other.setEnabled(False)
         origin_layout = QHBoxLayout()
+        origin_layout.setContentsMargins(0, 0, 0, 0)
         origin_layout.addWidget(self.origin_combo)
         origin_layout.addWidget(self.input_origin_other)
-        form_layout.addRow("Procedencia:", origin_layout)
-        self.input_hcl = QLineEdit(); form_layout.addRow("HCL:", self.input_hcl)
+        origin_widget = QWidget(); origin_widget.setLayout(origin_layout)
+        add_form_row(right_row, 1, "Procedencia:", origin_widget); right_row += 1
+        self.input_hcl = QLineEdit(); add_form_row(right_row, 1, "HCL:", self.input_hcl); right_row += 1
         self.input_height = QLineEdit(); self.input_height.setPlaceholderText("cm")
-        form_layout.addRow("Talla (cm):", self.input_height)
+        add_form_row(right_row, 1, "Talla (cm):", self.input_height); right_row += 1
         self.input_weight = QLineEdit(); self.input_weight.setPlaceholderText("kg")
-        form_layout.addRow("Peso (kg):", self.input_weight)
+        add_form_row(right_row, 1, "Peso (kg):", self.input_weight); right_row += 1
         self.input_blood_pressure = QLineEdit(); self.input_blood_pressure.setPlaceholderText("ej. 120/80")
-        form_layout.addRow("Presión Art.:", self.input_blood_pressure)
+        add_form_row(right_row, 1, "Presión Art.:", self.input_blood_pressure); right_row += 1
         self.input_diagnosis = QLineEdit(); self.input_diagnosis.setPlaceholderText("Ej. Síndrome febril")
-        form_layout.addRow("Diagnóstico presuntivo:", self.input_diagnosis)
+        add_form_row(right_row, 1, "Diagnóstico presuntivo:", self.input_diagnosis); right_row += 1
         self.input_observations = QLineEdit()
         self.input_observations.setPlaceholderText("Observaciones (laboratorio)")
         self.input_observations.setText("N/A")
         obs_layout = QHBoxLayout()
+        obs_layout.setContentsMargins(0, 0, 0, 0)
         obs_layout.addWidget(self.input_observations)
         btn_obs_na = QPushButton("Sin obs.")
         btn_obs_na.setFixedWidth(90)
         btn_obs_na.clicked.connect(lambda: self.input_observations.setText("N/A"))
         obs_layout.addWidget(btn_obs_na)
-        form_layout.addRow("Observaciones:", obs_layout)
+        obs_widget = QWidget(); obs_widget.setLayout(obs_layout)
+        add_form_row(right_row, 1, "Observaciones:", obs_widget); right_row += 1
         self.sample_date_edit = QDateEdit()
         self.sample_date_edit.setDisplayFormat("dd/MM/yyyy")
         self.sample_date_edit.setCalendarPopup(True)
@@ -1547,25 +1570,31 @@ class MainWindow(QMainWindow):
         self.sample_today_checkbox.stateChanged.connect(self.on_sample_today_toggle)
         self.sample_date_edit.setEnabled(False)
         sample_layout = QHBoxLayout()
+        sample_layout.setContentsMargins(0, 0, 0, 0)
         sample_layout.addWidget(self.sample_date_edit)
         sample_layout.addWidget(self.sample_today_checkbox)
         sample_layout.addStretch()
-        form_layout.addRow("F. muestra:", sample_layout)
+        sample_widget = QWidget(); sample_widget.setLayout(sample_layout)
+        add_form_row(right_row, 1, "F. muestra:", sample_widget); right_row += 1
         self.input_requested_by = QComboBox()
         self.input_requested_by.setEditable(True)
         self.input_requested_by.setInsertPolicy(QComboBox.NoInsert)
         self.input_requested_by.setSizeAdjustPolicy(QComboBox.AdjustToContents)
-        form_layout.addRow("Solicitante:", self.input_requested_by)
+        add_form_row(right_row, 1, "Solicitante:", self.input_requested_by); right_row += 1
         # Placeholder después de crear el combo editable
         if self.input_requested_by.lineEdit():
             self.input_requested_by.lineEdit().setPlaceholderText("Seleccione o escriba el médico solicitante")
         self.populate_requesters()
-        top_layout.addLayout(form_layout, 2)
+        top_layout.addWidget(form_container, 2)
         # Listado de pruebas por categoría (con scroll)
         tests_scroll = QScrollArea(); tests_scroll.setWidgetResizable(True)
-        tests_container = QWidget(); tests_layout = QVBoxLayout(tests_container)
+        tests_container = QWidget()
+        tests_layout = QGridLayout(tests_container)
         tests_layout.setContentsMargins(0, 0, 0, 0)
-        tests_layout.setSpacing(16)
+        tests_layout.setHorizontalSpacing(16)
+        tests_layout.setVerticalSpacing(16)
+        tests_layout.setColumnStretch(0, 1)
+        tests_layout.setColumnStretch(1, 1)
         self.test_checkboxes = []
         tests_controls_widget = QWidget()
         tests_controls_widget.setObjectName("TestsControlBar")
@@ -1585,20 +1614,31 @@ class MainWindow(QMainWindow):
         self.labdb.cur.execute("SELECT category, name FROM tests")
         for cat, name in self.labdb.cur.fetchall():
             categories.setdefault(cat, []).append(name)
-        for cat, tests in categories.items():
+        ordered_categories = sorted(
+            categories.items(),
+            key=lambda item: (
+                CATEGORY_DISPLAY_ORDER.index(item[0]) if item[0] in CATEGORY_DISPLAY_ORDER else len(CATEGORY_DISPLAY_ORDER),
+                item[0]
+            )
+        )
+        columns = 2
+        for index, (cat, tests) in enumerate(ordered_categories):
             group_box = QGroupBox(cat)
             group_box.setProperty("categoryGroup", True)
             group_layout = QVBoxLayout()
             group_layout.setContentsMargins(16, 12, 16, 16)
             group_layout.setSpacing(8)
-            for test_name in tests:
+            for test_name in sorted(tests):
                 cb = QCheckBox(test_name)
                 group_layout.addWidget(cb)
                 self.test_checkboxes.append(cb)
                 cb.toggled.connect(self.update_test_selection_count)
             group_box.setLayout(group_layout)
-            tests_layout.addWidget(group_box)
-        tests_layout.addStretch()
+            row = index // columns
+            column = index % columns
+            tests_layout.addWidget(group_box, row, column)
+        total_rows = (len(ordered_categories) + columns - 1) // columns
+        tests_layout.setRowStretch(total_rows, 1)
         tests_scroll.setWidget(tests_container)
         tests_panel = QWidget()
         tests_panel_layout = QVBoxLayout(tests_panel)
