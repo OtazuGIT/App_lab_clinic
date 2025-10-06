@@ -11,7 +11,7 @@ from PyQt5.QtWidgets import (QMainWindow, QWidget, QLabel, QPushButton, QVBoxLay
                              QStackedWidget, QFormLayout, QScrollArea, QGroupBox, QComboBox,
                              QLineEdit, QTextEdit, QTableWidget, QTableWidgetItem, QFileDialog, QMessageBox, QCheckBox,
                              QDateEdit, QRadioButton, QButtonGroup, QDialog, QDialogButtonBox, QListWidget, QListWidgetItem,
-                             QSpinBox, QInputDialog, QAbstractItemView)
+                             QSpinBox, QInputDialog, QAbstractItemView, QGridLayout)
 from PyQt5.QtCore import QDate, QDateTime, Qt, QTimer
 from PyQt5.QtGui import QColor, QFont
 from fpdf import FPDF  # Asegúrese de tener fpdf instalado (pip install fpdf)
@@ -1143,37 +1143,44 @@ class MainWindow(QMainWindow):
         # Configuración de ventana principal y menú lateral
         central_widget = QWidget()
         main_layout = QHBoxLayout(central_widget)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+
         side_menu_layout = QVBoxLayout()
+        side_menu_layout.setContentsMargins(20, 28, 20, 28)
+        side_menu_layout.setSpacing(18)
         side_menu_widget = QWidget()
+        side_menu_widget.setObjectName("SideMenu")
         side_menu_widget.setLayout(side_menu_layout)
-        side_menu_widget.setFixedWidth(200)
-        side_menu_widget.setStyleSheet("background-color: #2c3e50;")
+        side_menu_widget.setFixedWidth(220)
         title_label = QLabel(LAB_TITLE)
-        title_label.setStyleSheet("color: white; font-size: 16px; font-weight: bold;")
+        title_label.setObjectName("SideMenuTitle")
         title_label.setAlignment(Qt.AlignCenter)
         title_label.setWordWrap(True)
         side_menu_layout.addWidget(title_label)
-        side_menu_layout.addSpacing(10)
+        side_menu_layout.addSpacing(12)
         # Estilos y configuración del menú de navegación
         self.nav_buttons = OrderedDict()
         self.nav_button_default_style = (
             "QPushButton {"
-            "background-color: #4CAF50;"
-            "color: white;"
+            "background-color: transparent;"
+            "color: #f1f6ff;"
             "font-size: 14px;"
-            "padding: 10px 12px;"
+            "padding: 12px 14px;"
             "border: none;"
             "text-align: left;"
+            "border-radius: 10px;"
             "}"
-            "QPushButton:hover { background-color: #45a049; }"
+            "QPushButton:hover { background-color: rgba(255, 255, 255, 0.12); }"
         )
         self.nav_button_active_style = (
             "QPushButton {"
-            "background-color: #1E8449;"
+            "background-color: #2e86de;"
             "color: white;"
             "font-size: 14px;"
-            "padding: 10px 12px;"
-            "border: 2px solid #117A65;"
+            "padding: 12px 14px;"
+            "border: none;"
+            "border-radius: 10px;"
             "font-weight: bold;"
             "}"
         )
@@ -1182,19 +1189,126 @@ class MainWindow(QMainWindow):
         self.current_order_context = None
         # Contenedor principal con cabecera y reloj
         content_widget = QWidget()
+        content_widget.setObjectName("ContentArea")
         content_layout = QVBoxLayout(content_widget)
-        header_layout = QHBoxLayout()
+        content_layout.setContentsMargins(30, 30, 30, 30)
+        content_layout.setSpacing(24)
+        header_bar = QWidget()
+        header_bar.setObjectName("HeaderBar")
+        header_layout = QHBoxLayout(header_bar)
+        header_layout.setContentsMargins(20, 16, 20, 16)
+        header_layout.setSpacing(12)
         header_title = QLabel(LAB_TITLE)
-        header_title.setStyleSheet("font-size: 18px; font-weight: bold; color: #2c3e50;")
+        header_title.setObjectName("HeaderTitle")
         header_title.setWordWrap(True)
         self.clock_label = QLabel()
+        self.clock_label.setObjectName("HeaderClock")
         self.clock_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.clock_label.setStyleSheet("font-size: 16px; color: #0a84ff;")
         header_layout.addWidget(header_title)
         header_layout.addStretch()
         header_layout.addWidget(self.clock_label)
-        content_layout.addLayout(header_layout)
+        content_layout.addWidget(header_bar)
         content_layout.addWidget(self.stack)
+        self.setStyleSheet(
+            """
+            QMainWindow {
+                background-color: #eef2f8;
+            }
+            QWidget#SideMenu {
+                background-color: #1f2d3d;
+            }
+            QWidget#SideMenu QPushButton {
+                font-weight: 600;
+            }
+            QLabel#SideMenuTitle {
+                color: #f5f8ff;
+                font-size: 18px;
+                font-weight: 700;
+                padding: 0 6px;
+            }
+            QWidget#ContentArea {
+                background-color: #f9fbff;
+            }
+            QWidget#HeaderBar {
+                background-color: #ffffff;
+                border-radius: 16px;
+                border: 1px solid #d7e1f0;
+            }
+            QLabel#HeaderTitle {
+                font-size: 20px;
+                font-weight: 700;
+                color: #1f2d3d;
+            }
+            QLabel#HeaderClock {
+                font-size: 16px;
+                color: #0a84ff;
+                font-weight: 600;
+            }
+            QLabel#TestCountLabel {
+                font-weight: 700;
+                color: #1f2d3d;
+            }
+            QWidget#TestsControlBar {
+                background-color: rgba(46, 134, 222, 0.12);
+                border: 1px solid #c7d7f0;
+                border-radius: 12px;
+            }
+            QWidget#TestsControlBar QPushButton {
+                background-color: transparent;
+                color: #176b3a;
+                border: 1px solid #1E8449;
+                border-radius: 8px;
+                padding: 6px 14px;
+            }
+            QWidget#TestsControlBar QPushButton:disabled {
+                color: #8aa2c0;
+                border-color: #b1c4dd;
+            }
+            QGroupBox {
+                border: 1px solid #dbe4f3;
+                border-radius: 12px;
+                margin-top: 12px;
+                background-color: #ffffff;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 14px;
+                padding: 0 6px;
+                color: #1f2d3d;
+                font-weight: 600;
+            }
+            QLabel#OrderInfoValue {
+                font-weight: 600;
+                color: #1f2d3d;
+            }
+            QLineEdit, QComboBox, QTextEdit, QDateEdit, QSpinBox {
+                border: 1px solid #cbd5e1;
+                border-radius: 8px;
+                padding: 6px 8px;
+                background: #ffffff;
+            }
+            QLineEdit:focus, QComboBox:focus, QTextEdit:focus, QDateEdit:focus, QSpinBox:focus {
+                border-color: #3584e4;
+            }
+            QPushButton {
+                background-color: #2e86de;
+                color: white;
+                border-radius: 10px;
+                padding: 10px 16px;
+                font-weight: 600;
+            }
+            QPushButton:hover:!disabled {
+                background-color: #1b4f72;
+            }
+            QPushButton:disabled {
+                background-color: #c5d3e6;
+                color: #f5f6fa;
+            }
+            QTableWidget {
+                background-color: #ffffff;
+            }
+            """
+        )
         # 1. Página de Registro de Pacientes
         self.page_registro = QWidget(); self.init_registro_page()
         self.stack.addWidget(self.page_registro)
@@ -1298,9 +1412,14 @@ class MainWindow(QMainWindow):
         return "\n".join(lines)
     def init_registro_page(self):
         layout = QVBoxLayout(self.page_registro)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(24)
         top_layout = QHBoxLayout()
+        top_layout.setSpacing(24)
         # Formulario de datos del paciente
         form_layout = QFormLayout()
+        form_layout.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        form_layout.setFormAlignment(Qt.AlignTop)
         self.input_doc_type = QComboBox(); self.input_doc_type.addItems(["DNI", "Carnet Ext.", "Pasaporte"])
         self.input_doc_number = QLineEdit()
         btn_search = QPushButton("Buscar"); btn_search.setFixedWidth(60)
@@ -1312,7 +1431,7 @@ class MainWindow(QMainWindow):
         self.input_last_name = QLineEdit(); form_layout.addRow("Apellidos:", self.input_last_name)
         # Fecha de nacimiento y edad calculada automáticamente (editable)
         self.input_birth_date = QDateEdit()
-        self.input_birth_date.setDisplayFormat("dd-MM-yyyy")
+        self.input_birth_date.setDisplayFormat("dd/MM/yyyy")
         self.input_birth_date.setCalendarPopup(True)
         self.input_birth_date.setDate(QDate.currentDate())
         self.input_birth_date.dateChanged.connect(self.update_age_from_birth_date)
@@ -1344,7 +1463,7 @@ class MainWindow(QMainWindow):
         self.gestational_weeks_spin.setSuffix(" sem")
         self.gestational_weeks_spin.setEnabled(False)
         self.expected_delivery_date = QDateEdit(QDate.currentDate())
-        self.expected_delivery_date.setDisplayFormat("dd-MM-yyyy")
+        self.expected_delivery_date.setDisplayFormat("dd/MM/yyyy")
         self.expected_delivery_date.setCalendarPopup(True)
         self.expected_delivery_date.setEnabled(False)
         self.pregnancy_container = QWidget()
@@ -1391,7 +1510,7 @@ class MainWindow(QMainWindow):
         obs_layout.addWidget(btn_obs_na)
         form_layout.addRow("Observaciones:", obs_layout)
         self.sample_date_edit = QDateEdit()
-        self.sample_date_edit.setDisplayFormat("dd-MM-yyyy")
+        self.sample_date_edit.setDisplayFormat("dd/MM/yyyy")
         self.sample_date_edit.setCalendarPopup(True)
         self.sample_date_edit.setDate(QDate.currentDate())
         self.sample_today_checkbox = QCheckBox("Hoy")
@@ -1412,21 +1531,24 @@ class MainWindow(QMainWindow):
         if self.input_requested_by.lineEdit():
             self.input_requested_by.lineEdit().setPlaceholderText("Seleccione o escriba el médico solicitante")
         self.populate_requesters()
-        top_layout.addLayout(form_layout)
+        top_layout.addLayout(form_layout, 2)
         # Listado de pruebas por categoría (con scroll)
         tests_scroll = QScrollArea(); tests_scroll.setWidgetResizable(True)
         tests_container = QWidget(); tests_layout = QVBoxLayout(tests_container)
         self.test_checkboxes = []
-        tests_controls_layout = QHBoxLayout()
+        tests_controls_widget = QWidget()
+        tests_controls_widget.setObjectName("TestsControlBar")
+        tests_controls_layout = QHBoxLayout(tests_controls_widget)
+        tests_controls_layout.setContentsMargins(16, 12, 16, 12)
+        tests_controls_layout.setSpacing(12)
         self.test_selection_count_label = QLabel("Pruebas seleccionadas: 0")
-        self.test_selection_count_label.setStyleSheet("font-weight: bold;")
+        self.test_selection_count_label.setObjectName("TestCountLabel")
         tests_controls_layout.addWidget(self.test_selection_count_label)
         tests_controls_layout.addStretch()
         self.clear_tests_button = QPushButton("Borrar todas las pruebas")
         self.clear_tests_button.setToolTip("Desmarca todas las pruebas seleccionadas")
         self.clear_tests_button.clicked.connect(self.clear_selected_tests)
         tests_controls_layout.addWidget(self.clear_tests_button)
-        tests_layout.addLayout(tests_controls_layout)
         # Obtener pruebas agrupadas por categoría de la BD
         categories = {}
         self.labdb.cur.execute("SELECT category, name FROM tests")
@@ -1444,7 +1566,13 @@ class MainWindow(QMainWindow):
             tests_layout.addWidget(group_box)
         tests_layout.addStretch()
         tests_scroll.setWidget(tests_container)
-        top_layout.addWidget(tests_scroll)
+        tests_panel = QWidget()
+        tests_panel_layout = QVBoxLayout(tests_panel)
+        tests_panel_layout.setContentsMargins(0, 0, 0, 0)
+        tests_panel_layout.setSpacing(16)
+        tests_panel_layout.addWidget(tests_controls_widget)
+        tests_panel_layout.addWidget(tests_scroll)
+        top_layout.addWidget(tests_panel, 3)
         layout.addLayout(top_layout)
         self.update_test_selection_count()
         # Botones de acción
@@ -1566,6 +1694,51 @@ class MainWindow(QMainWindow):
                 return str(int(value))
             return f"{value:.2f}".rstrip('0').rstrip('.')
         return str(value)
+    def _format_date_display(self, value, placeholder="—"):
+        if value in (None, ""):
+            return placeholder
+        if isinstance(value, QDate):
+            if value.isValid():
+                return value.toString("dd/MM/yyyy")
+            return placeholder
+        if isinstance(value, datetime.date) and not isinstance(value, datetime.datetime):
+            return value.strftime("%d/%m/%Y")
+        for fmt in ("%Y-%m-%d", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f"):
+            try:
+                parsed = datetime.datetime.strptime(str(value), fmt)
+                return parsed.strftime("%d/%m/%Y")
+            except (ValueError, TypeError):
+                continue
+        try:
+            parsed = datetime.datetime.fromisoformat(str(value))
+            return parsed.strftime("%d/%m/%Y")
+        except Exception:
+            return str(value)
+
+    def _format_datetime_display(self, value, placeholder="—", include_seconds=False):
+        if value in (None, ""):
+            return placeholder
+        if isinstance(value, QDateTime):
+            if value.isValid():
+                fmt = "dd/MM/yyyy HH:mm:ss" if include_seconds else "dd/MM/yyyy HH:mm"
+                return value.toString(fmt)
+            return placeholder
+        if isinstance(value, datetime.datetime):
+            fmt = "%d/%m/%Y %H:%M:%S" if include_seconds else "%d/%m/%Y %H:%M"
+            return value.strftime(fmt)
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f"):
+            try:
+                parsed = datetime.datetime.strptime(str(value), fmt)
+                fmt_out = "%d/%m/%Y %H:%M:%S" if include_seconds else "%d/%m/%Y %H:%M"
+                return parsed.strftime(fmt_out)
+            except (ValueError, TypeError):
+                continue
+        try:
+            parsed = datetime.datetime.fromisoformat(str(value))
+            fmt_out = "%d/%m/%Y %H:%M:%S" if include_seconds else "%d/%m/%Y %H:%M"
+            return parsed.strftime(fmt_out)
+        except Exception:
+            return str(value)
     def autofill_patient(self):
         doc_type = self.input_doc_type.currentText()
         doc_number = self.input_doc_number.text().strip()
@@ -1736,7 +1909,16 @@ class MainWindow(QMainWindow):
             age_years=age_years,
             sample_date=sample_date
         )
-        QMessageBox.information(self, "Registro exitoso", f"Paciente y pruebas registrados (Orden #{order_id}).")
+        sample_display = self._format_date_display(sample_date, "-")
+        patient_display = f"{first_name} {last_name}".strip()
+        if not patient_display:
+            patient_display = "Paciente registrado"
+        message_lines = [
+            patient_display,
+            f"F. toma de muestra: {sample_display}",
+            f"Orden #{order_id} registrada correctamente."
+        ]
+        QMessageBox.information(self, "Registro exitoso", "\n".join(message_lines))
         # Habilitar botón para ir a anotar resultados de esta orden
         btn_to_results.setEnabled(True)
         self.last_order_registered = order_id
@@ -1817,7 +1999,10 @@ class MainWindow(QMainWindow):
         self.results_add_tests_btn = QPushButton("Agregar pruebas")
         self.results_add_tests_btn.setEnabled(False)
         btn_delete_order = QPushButton("Eliminar orden")
-        btn_delete_order.setStyleSheet("color: #c0392b;")
+        btn_delete_order.setStyleSheet(
+            "QPushButton { background-color: #ffe8e6; color: #c0392b; border-radius: 10px; border: 1px solid #c0392b; }"
+            "QPushButton:hover:!disabled { background-color: #fbd1ce; }"
+        )
         top_layout.addWidget(lbl)
         top_layout.addWidget(self.combo_orders)
         top_layout.addWidget(btn_load)
@@ -1848,12 +2033,13 @@ class MainWindow(QMainWindow):
         pending = self.labdb.get_pending_orders()
         self.pending_orders_cache = []
         for row in pending:
-            oid, first, last, date, doc_type, doc_number = row
+            oid, first, last, date, sample_date, doc_type, doc_number = row
             self.pending_orders_cache.append({
                 "id": oid,
                 "first_name": (first or "").upper(),
                 "last_name": (last or "").upper(),
                 "date": date,
+                "sample_date": sample_date,
                 "doc_type": doc_type or "",
                 "doc_number": doc_number or ""
             })
@@ -1876,7 +2062,8 @@ class MainWindow(QMainWindow):
                 order['last_name'] or "",
                 order['doc_type'] or "",
                 order['doc_number'] or "",
-                order['date'] or ""
+                order.get('date') or "",
+                order.get('sample_date') or ""
             ]).lower()
             if filter_text in search_blob:
                 filtered_orders.append(order)
@@ -1914,7 +2101,13 @@ class MainWindow(QMainWindow):
         status_tag = ""
         if 'emitted' in order:
             status_tag = " [EMITIDO]" if order.get('emitted') else " [POR EMITIR]"
-        return f"Orden #{order['id']} | {order['date']} | {name_text}{doc_text}{status_tag}"
+        order_timestamp = self._format_datetime_display(order.get('date'), "-")
+        sample_display = self._format_date_display(order.get('sample_date'), "-")
+        name_section = name_text if name_text else "Sin paciente"
+        return (
+            f"Orden #{order['id']} · {name_section}{doc_text} · "
+            f"Registro: {order_timestamp} · F. muestra: {sample_display}{status_tag}"
+        )
     def _select_order_in_combo(self, combo, order_id):
         for idx in range(combo.count()):
             if combo.itemData(idx) == order_id:
@@ -2023,6 +2216,44 @@ class MainWindow(QMainWindow):
             self.results_layout.addWidget(empty_label)
             self.results_layout.addStretch()
             return
+        summary_group = QGroupBox("Resumen de la orden")
+        summary_group.setObjectName("OrderSummaryGroup")
+        summary_layout = QGridLayout(summary_group)
+        summary_layout.setContentsMargins(18, 12, 18, 12)
+        summary_layout.setHorizontalSpacing(18)
+        summary_layout.setVerticalSpacing(10)
+        summary_layout.setColumnStretch(1, 1)
+        summary_layout.setColumnStretch(3, 1)
+
+        def _add_summary(row, col, label_text, value_text):
+            label = QLabel(label_text)
+            label.setStyleSheet("color: #5a6b7b; font-weight: 600;")
+            value = QLabel(value_text if value_text not in (None, "") else "-")
+            value.setObjectName("OrderInfoValue")
+            value.setWordWrap(True)
+            summary_layout.addWidget(label, row, col)
+            summary_layout.addWidget(value, row, col + 1)
+
+        patient_name = patient_info.get("name") or "-"
+        doc_display = " ".join(part for part in (
+            patient_info.get("doc_type"),
+            patient_info.get("doc_number")
+        ) if part) or "-"
+        order_timestamp = self._format_datetime_display(order_info.get('date'), "-")
+        sample_display = self._format_date_display(order_info.get('sample_date'), "-")
+        requester_display = order_info.get('requested_by') or "-"
+        origin_display = (patient_info.get('origin') or '-').upper()
+        insurance_display = self._format_insurance_display(order_info.get('insurance_type'))
+        _add_summary(0, 0, "Paciente", patient_name)
+        _add_summary(0, 2, "Documento", doc_display)
+        _add_summary(1, 0, "F. registro", order_timestamp)
+        _add_summary(1, 2, "F. muestra", sample_display)
+        _add_summary(2, 0, "Solicitante", requester_display)
+        _add_summary(2, 2, "Procedencia", origin_display)
+        _add_summary(3, 0, "Seguro", insurance_display)
+        fua_display = order_info.get('fua_number') or "-"
+        _add_summary(3, 2, "FUA", fua_display if insurance_display != "PARTICULAR" else "No aplica")
+        self.results_layout.addWidget(summary_group)
         if hasattr(self, 'results_add_tests_btn'):
             self.results_add_tests_btn.setEnabled(True)
         order_test_names = [name for (name, *_rest) in rows]
@@ -2913,21 +3144,7 @@ class MainWindow(QMainWindow):
         return aggregated
 
     def _format_short_date(self, value):
-        if not value:
-            return "—"
-        if isinstance(value, datetime.date) and not isinstance(value, datetime.datetime):
-            return value.strftime("%d/%m/%y")
-        for fmt in ("%Y-%m-%d", "%Y-%m-%d %H:%M:%S"):
-            try:
-                parsed = datetime.datetime.strptime(value, fmt)
-                return parsed.strftime("%d/%m/%y")
-            except (ValueError, TypeError):
-                continue
-        try:
-            parsed = datetime.datetime.fromisoformat(str(value))
-            return parsed.strftime("%d/%m/%y")
-        except Exception:
-            return str(value)
+        return self._format_date_display(value, "—")
 
     def _format_patient_block_for_registry(self, entry):
         def clean(text):
@@ -2975,11 +3192,10 @@ class MainWindow(QMainWindow):
     def _format_emission_status(self, emitted_flag, emitted_at):
         if emitted_flag:
             if emitted_at:
-                try:
-                    parsed = datetime.datetime.strptime(emitted_at, "%Y-%m-%d %H:%M:%S")
-                    return f"Sí ({parsed.strftime('%d/%m/%Y')})"
-                except Exception:
-                    return "Sí"
+                display = self._format_date_display(emitted_at, None)
+                if display and display not in {"—", None}:
+                    return f"Sí ({display})"
+                return "Sí"
             return "Sí"
         if emitted_flag == 0:
             return "No"
@@ -3280,7 +3496,10 @@ class MainWindow(QMainWindow):
         btn_view = QPushButton("Ver")
         btn_add_tests = QPushButton("Agregar pruebas")
         btn_delete_completed = QPushButton("Eliminar orden")
-        btn_delete_completed.setStyleSheet("color: #c0392b;")
+        btn_delete_completed.setStyleSheet(
+            "QPushButton { background-color: #ffe8e6; color: #c0392b; border-radius: 10px; border: 1px solid #c0392b; }"
+            "QPushButton:hover:!disabled { background-color: #fbd1ce; }"
+        )
         top_layout.addWidget(lbl)
         top_layout.addWidget(self.combo_completed, 1)
         top_layout.addWidget(btn_view)
@@ -3324,12 +3543,13 @@ class MainWindow(QMainWindow):
         completed_rows = self.labdb.get_completed_orders(include_emitted=include_emitted)
         self.completed_orders_cache = []
         for row in completed_rows:
-            oid, first, last, date, doc_type, doc_number, emitted, emitted_at = row
+            oid, first, last, date, sample_date, doc_type, doc_number, emitted, emitted_at = row
             order = {
                 "id": oid,
                 "first_name": (first or "").upper(),
                 "last_name": (last or "").upper(),
                 "date": date,
+                "sample_date": sample_date,
                 "doc_type": doc_type or "",
                 "doc_number": doc_number or "",
                 "emitted": bool(emitted),
@@ -3511,23 +3731,12 @@ class MainWindow(QMainWindow):
         lines.append(f"SOLICITANTE: {requester}")
         emission_raw = ord_inf.get('emitted_at')
         if emission_raw:
-            try:
-                emission_dt = datetime.datetime.strptime(emission_raw, "%Y-%m-%d %H:%M:%S")
-                emission_display = emission_dt.strftime("%d/%m/%Y %H:%M")
-            except Exception:
-                emission_display = emission_raw
+            emission_display = self._format_datetime_display(emission_raw, emission_raw)
         else:
             emission_display = "Pendiente de emisión"
         lines.append(f"FECHA DEL INFORME: {emission_display}")
         sample_raw = ord_inf.get('sample_date')
-        if sample_raw:
-            try:
-                sample_dt = datetime.datetime.strptime(sample_raw, "%Y-%m-%d")
-                sample_display = sample_dt.strftime("%d/%m/%Y")
-            except Exception:
-                sample_display = sample_raw
-        else:
-            sample_display = "-"
+        sample_display = self._format_date_display(sample_raw, "-")
         lines.append(f"FECHA DE TOMA DE MUESTRA: {sample_display}")
         lines.append("RESULTADOS:")
         for test_name, raw_result, _, sample_status, sample_issue, observation, _ in results:
@@ -3655,13 +3864,7 @@ class MainWindow(QMainWindow):
             else:
                 pregnancy_text = 'No'
         sample_date_raw = ord_inf.get('sample_date')
-        sample_date_display = '-'
-        if sample_date_raw:
-            try:
-                sample_dt = datetime.datetime.strptime(sample_date_raw, "%Y-%m-%d")
-                sample_date_display = sample_dt.strftime("%d/%m/%Y")
-            except Exception:
-                sample_date_display = sample_date_raw
+        sample_date_display = self._format_date_display(sample_date_raw, '-')
         if not print_display:
             print_display = emission_display
         insurance_display = self._format_insurance_display(ord_inf.get('insurance_type'))
@@ -4129,12 +4332,12 @@ class MainWindow(QMainWindow):
         controls_layout.addWidget(self.range_combo)
         controls_layout.addSpacing(10)
         self.start_date_edit = QDateEdit(QDate.currentDate())
-        self.start_date_edit.setDisplayFormat("dd-MM-yyyy")
+        self.start_date_edit.setDisplayFormat("dd/MM/yyyy")
         self.start_date_edit.setCalendarPopup(True)
         controls_layout.addWidget(QLabel("Desde:"))
         controls_layout.addWidget(self.start_date_edit)
         self.end_date_edit = QDateEdit(QDate.currentDate())
-        self.end_date_edit.setDisplayFormat("dd-MM-yyyy")
+        self.end_date_edit.setDisplayFormat("dd/MM/yyyy")
         self.end_date_edit.setCalendarPopup(True)
         controls_layout.addWidget(QLabel("Hasta:"))
         controls_layout.addWidget(self.end_date_edit)
@@ -4144,7 +4347,10 @@ class MainWindow(QMainWindow):
         self.export_activity_csv_btn = QPushButton("Exportar CSV")
         self.export_activity_delivery_btn = QPushButton("Hoja de entrega")
         self.delete_activity_btn = QPushButton("Eliminar selección")
-        self.delete_activity_btn.setStyleSheet("color: #c0392b;")
+        self.delete_activity_btn.setStyleSheet(
+            "QPushButton { background-color: #ffe8e6; color: #c0392b; border-radius: 10px; border: 1px solid #c0392b; }"
+            "QPushButton:hover:!disabled { background-color: #fbd1ce; }"
+        )
         controls_layout.addWidget(self.view_activity_btn)
         controls_layout.addWidget(self.export_activity_pdf_btn)
         controls_layout.addWidget(self.export_activity_csv_btn)
@@ -4157,7 +4363,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.activity_caption)
         self.activity_table = QTableWidget(0, 8)
         self.activity_table.setHorizontalHeaderLabels([
-            "Fecha",
+            "F. muestra / Registro",
             "Orden",
             "Paciente",
             "Documento",
@@ -4188,7 +4394,7 @@ class MainWindow(QMainWindow):
         history_search_layout.addStretch()
         history_layout.addLayout(history_search_layout)
         history_headers = [
-            "Fecha",
+            "F. muestra / Registro",
             "Orden",
             "Paciente",
             "Documento",
@@ -4417,19 +4623,9 @@ class MainWindow(QMainWindow):
             sample_issue,
             observation
         ) in rows:
-            display_date = "-"
-            if sample_date_str:
-                try:
-                    sample_dt = datetime.datetime.strptime(sample_date_str, "%Y-%m-%d")
-                    display_date = sample_dt.strftime("%d/%m/%Y")
-                except Exception:
-                    display_date = sample_date_str
+            display_date = self._format_date_display(sample_date_str, "-")
             if display_date == "-":
-                try:
-                    order_dt = datetime.datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
-                    display_date = order_dt.strftime("%d/%m/%Y %H:%M")
-                except Exception:
-                    display_date = date_str or "-"
+                display_date = self._format_datetime_display(date_str, date_str or "-")
             patient_name = " ".join(part for part in [(first or "").upper(), (last or "").upper()] if part).strip() or "-"
             doc_text = " ".join(part for part in (doc_type, doc_number) if part).strip() or "-"
             age_display = str(age_years) if age_years not in (None, "") else "-"
@@ -5008,19 +5204,9 @@ class MainWindow(QMainWindow):
                 observation,
                 entry_id
             ) = row
-            display_date = "-"
-            if sample_date_str:
-                try:
-                    sample_dt = datetime.datetime.strptime(sample_date_str, "%Y-%m-%d")
-                    display_date = sample_dt.strftime("%d/%m/%Y")
-                except Exception:
-                    display_date = sample_date_str
+            display_date = self._format_date_display(sample_date_str, "-")
             if display_date == "-":
-                try:
-                    order_dt = datetime.datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
-                    display_date = order_dt.strftime("%d/%m/%Y %H:%M")
-                except Exception:
-                    display_date = date_str or "-"
+                display_date = self._format_datetime_display(date_str, date_str or "-")
             patient_name = " ".join(part for part in [(first_name or "").upper(), (last_name or "").upper()] if part).strip() or "-"
             doc_text = " ".join(part for part in (doc_type, doc_value) if part).strip() or "-"
             age_display = str(age_years) if age_years not in (None, "") else "-"

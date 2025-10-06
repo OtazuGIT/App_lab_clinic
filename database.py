@@ -487,7 +487,7 @@ class LabDB:
 
     def get_pending_orders(self):
         self.cur.execute("""
-            SELECT o.id, p.first_name, p.last_name, o.date, p.doc_type, p.doc_number
+            SELECT o.id, p.first_name, p.last_name, o.date, o.sample_date, p.doc_type, p.doc_number
             FROM orders o
             JOIN patients p ON o.patient_id=p.id
             WHERE o.completed=0 AND (o.deleted IS NULL OR o.deleted=0)
@@ -498,7 +498,7 @@ class LabDB:
     def get_completed_orders(self, include_emitted=False):
         if include_emitted:
             self.cur.execute("""
-                SELECT o.id, p.first_name, p.last_name, o.date, p.doc_type, p.doc_number, o.emitted, o.emitted_at
+                SELECT o.id, p.first_name, p.last_name, o.date, o.sample_date, p.doc_type, p.doc_number, o.emitted, o.emitted_at
                 FROM orders o
                 JOIN patients p ON o.patient_id=p.id
                 WHERE o.completed=1 AND (o.deleted IS NULL OR o.deleted=0)
@@ -506,7 +506,7 @@ class LabDB:
             """)
         else:
             self.cur.execute("""
-                SELECT o.id, p.first_name, p.last_name, o.date, p.doc_type, p.doc_number, o.emitted, o.emitted_at
+                SELECT o.id, p.first_name, p.last_name, o.date, o.sample_date, p.doc_type, p.doc_number, o.emitted, o.emitted_at
                 FROM orders o
                 JOIN patients p ON o.patient_id=p.id
                 WHERE o.completed=1 AND (o.emitted IS NULL OR o.emitted=0)
