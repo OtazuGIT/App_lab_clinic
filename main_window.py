@@ -1264,6 +1264,15 @@ class MainWindow(QMainWindow):
                 color: #8aa2c0;
                 border-color: #b1c4dd;
             }
+            QWidget#RegisterButtonBar {
+                background-color: #ffffff;
+                border: 1px solid #d7e1f0;
+                border-radius: 16px;
+            }
+            QWidget#RegisterButtonBar QPushButton {
+                min-height: 42px;
+                font-size: 14px;
+            }
             QGroupBox {
                 border: 1px solid #dbe4f3;
                 border-radius: 12px;
@@ -1276,6 +1285,14 @@ class MainWindow(QMainWindow):
                 padding: 0 6px;
                 color: #1f2d3d;
                 font-weight: 600;
+            }
+            QGroupBox[categoryGroup="true"] {
+                background-color: #eef4ff;
+                border-color: #b8cbea;
+            }
+            QGroupBox[categoryGroup="true"]::title {
+                color: #1c3f66;
+                font-weight: 700;
             }
             QLabel#OrderInfoValue {
                 font-weight: 600;
@@ -1411,9 +1428,21 @@ class MainWindow(QMainWindow):
             lines.append(self.user.get('username', ''))
         return "\n".join(lines)
     def init_registro_page(self):
-        layout = QVBoxLayout(self.page_registro)
+        page_layout = QVBoxLayout(self.page_registro)
+        page_layout.setContentsMargins(0, 0, 0, 0)
+        page_layout.setSpacing(20)
+
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        page_layout.addWidget(scroll_area, 1)
+
+        scroll_content = QWidget()
+        scroll_area.setWidget(scroll_content)
+        layout = QVBoxLayout(scroll_content)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(24)
+
         top_layout = QHBoxLayout()
         top_layout.setSpacing(24)
         # Formulario de datos del paciente
@@ -1535,6 +1564,8 @@ class MainWindow(QMainWindow):
         # Listado de pruebas por categoría (con scroll)
         tests_scroll = QScrollArea(); tests_scroll.setWidgetResizable(True)
         tests_container = QWidget(); tests_layout = QVBoxLayout(tests_container)
+        tests_layout.setContentsMargins(0, 0, 0, 0)
+        tests_layout.setSpacing(16)
         self.test_checkboxes = []
         tests_controls_widget = QWidget()
         tests_controls_widget.setObjectName("TestsControlBar")
@@ -1556,7 +1587,10 @@ class MainWindow(QMainWindow):
             categories.setdefault(cat, []).append(name)
         for cat, tests in categories.items():
             group_box = QGroupBox(cat)
+            group_box.setProperty("categoryGroup", True)
             group_layout = QVBoxLayout()
+            group_layout.setContentsMargins(16, 12, 16, 16)
+            group_layout.setSpacing(8)
             for test_name in tests:
                 cb = QCheckBox(test_name)
                 group_layout.addWidget(cb)
@@ -1574,6 +1608,7 @@ class MainWindow(QMainWindow):
         tests_panel_layout.addWidget(tests_scroll)
         top_layout.addWidget(tests_panel, 3)
         layout.addLayout(top_layout)
+        layout.addStretch()
         self.update_test_selection_count()
         # Botones de acción
         btn_register = QPushButton("Registrar paciente y pruebas")
@@ -1583,9 +1618,15 @@ class MainWindow(QMainWindow):
         btn_register.clicked.connect(lambda: self.register_patient(btn_to_results))
         btn_new.clicked.connect(self.clear_registration_form)
         btn_to_results.clicked.connect(self.go_to_results)
-        btns_layout = QHBoxLayout()
-        btns_layout.addWidget(btn_register); btns_layout.addWidget(btn_new); btns_layout.addWidget(btn_to_results)
-        layout.addLayout(btns_layout)
+        button_bar = QWidget()
+        button_bar.setObjectName("RegisterButtonBar")
+        btns_layout = QHBoxLayout(button_bar)
+        btns_layout.setContentsMargins(20, 16, 20, 16)
+        btns_layout.setSpacing(16)
+        btns_layout.addWidget(btn_register)
+        btns_layout.addWidget(btn_new)
+        btns_layout.addWidget(btn_to_results)
+        page_layout.addWidget(button_bar, 0)
     def populate_requesters(self, keep_current=False):
         current_text = self.input_requested_by.currentText().strip() if keep_current else ""
         items_lower = set()
