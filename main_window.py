@@ -103,6 +103,8 @@ REGISTRY_ABBREVIATIONS = {
     "resultado": "Res",
     "interpretacion": "Interp",
     "hora de toma/envio": "Hora toma",
+    "fecha de toma": "F. toma",
+    "fecha_toma": "F. toma",
     "destino / referencia": "Destino",
     "destino": "Destino",
     "observaciones (laboratorio)": "Obs",
@@ -507,6 +509,7 @@ WIDAL_FIELDS = [
 def build_sample_tracking_template(reference_note):
     return {
         "fields": [
+            {"key": "fecha_toma", "label": "Fecha de toma", "placeholder": "DD/MM/AAAA", "reference": "Coincide con el registro de 'F. muestra'"},
             {"key": "hora_toma", "label": "Hora de toma/envío", "placeholder": "HH:MM", "reference": "Registrar hora oficial de la toma"},
             {"key": "destino", "label": "Destino / referencia", "optional": True, "placeholder": "Ej. Laboratorio de referencia"},
             {"key": "observaciones", "label": "Observaciones", "type": "text_area", "optional": True, "reference": reference_note}
@@ -2503,6 +2506,7 @@ class MainWindow(QMainWindow):
         results_payload = {}
         has_empty = False
         pending_samples = 0
+        pending_tests = []
         missing_notes = []
         for test_name, info in self.order_fields.items():
             template = info.get("template")
@@ -2521,6 +2525,7 @@ class MainWindow(QMainWindow):
             observation_value = observation_widget.toPlainText().strip() if observation_widget else ""
             if status_value == "pendiente":
                 pending_samples += 1
+                pending_tests.append(test_name) 
             if status_value == "recibida":
                 issue_value = ""
             if status_value in {"pendiente", "rechazada"} and not issue_value:
@@ -2567,6 +2572,17 @@ class MainWindow(QMainWindow):
             if reply == QMessageBox.No:
                 return
         completed = self.labdb.save_results(self.selected_order_id, results_payload)
+        followup_order_id = None
+        if pending_tests:
+            followup_order_id = self.labdb.ensure_followup_order_for_pending(
+                self.selected_order_id,
+                pending_tests,
+                self.user.get('id')
+            )
+            if followup_order_id:
+                self.populate_pending_orders()
+                if self.selected_order_id:
+                    self._select_order_in_combo(self.combo_orders, self.selected_order_id)
         if completed:
             QMessageBox.information(self, "Completado", "Resultados guardados. Orden marcada como completada.")
             self.selected_order_id = None
@@ -2581,6 +2597,8 @@ class MainWindow(QMainWindow):
             message = "Resultados guardados (orden aún incompleta)."
             if pending_samples:
                 message += "\nHay muestras pendientes o rechazadas registradas."
+            if followup_order_id:
+                message += f"\nSe generó la orden #{followup_order_id} para el seguimiento de las pruebas pendientes."
             QMessageBox.information(self, "Guardado", message)
             self.load_order_fields()
 
