@@ -201,6 +201,7 @@ class LabDB:
         self._ensure_test_exists("Secreción vaginal", "MICROBIOLOGÍA")
         self._ensure_test_exists("Secreción (otros sitios)", "MICROBIOLOGÍA")
         self._ensure_test_exists("Hemoglobina - Hematocrito", "HEMATOLOGÍA")
+        self._ensure_test_exists("Parasitológico seriado", "PARASITOLOGÍA")
         # Cargar mapa de pruebas (nombre -> id)
         self.cur.execute("SELECT id, name FROM tests")
         for tid, name in self.cur.fetchall():
@@ -600,6 +601,57 @@ class LabDB:
             )
         return self._update_order_completion(order_id)
 
+    def ensure_followup_order_for_pending(self, source_order_id, pending_tests, user_id):
+        if not source_order_id or not pending_tests or not user_id:
+            return None
+        self.cur.execute(
+            """
+            SELECT patient_id, requested_by, diagnosis, insurance_type, fua_number, age_years
+            FROM orders
+            WHERE id=? AND (deleted IS NULL OR deleted=0)
+            """,
+            (source_order_id,)
+        )
+        row = self.cur.fetchone()
+        if not row:
+            return None
+        patient_id, requested_by, diagnosis, insurance_type, fua_number, age_years = row
+        normalized_tests = []
+        for name in pending_tests:
+            if not name:
+                continue
+            if name not in self.test_map:
+                self.cur.execute("SELECT id FROM tests WHERE name=?", (name,))
+                fetched = self.cur.fetchone()
+                if fetched:
+                    self.test_map[name] = fetched[0]
+            if name in self.test_map:
+                normalized_tests.append(name)
+        if not normalized_tests:
+            return None
+        tests_to_add = []
+        for test_name in normalized_tests:
+            if not self._pending_test_has_followup(patient_id, source_order_id, test_name):
+                tests_to_add.append(test_name)
+        if not tests_to_add:
+            return None
+        base_note = f"Pendiente de orden #{source_order_id}"
+        detail_note = ", ".join(tests_to_add)
+        observations = base_note if not detail_note else f"{base_note} - {detail_note}"
+        new_order_id = self.add_order_with_tests(
+            patient_id,
+            tests_to_add,
+            user_id,
+            observations=observations,
+            requested_by=requested_by or "",
+            diagnosis=diagnosis or "",
+            insurance_type=insurance_type or "SIS",
+            fua_number=fua_number,
+            age_years=age_years,
+            sample_date=None
+        )
+        return new_order_id
+
     def remove_test_from_order(self, order_id, test_name):
         if not test_name:
             return False
@@ -645,6 +697,27 @@ class LabDB:
         self.cur.execute("UPDATE orders SET completed=? WHERE id=?", (completed_flag, order_id))
         self.conn.commit()
         return completed_flag
+
+    def _pending_test_has_followup(self, patient_id, source_order_id, test_name):
+        if not patient_id or not source_order_id or not test_name:
+            return False
+        pattern = f"%Pendiente de orden #{source_order_id}%"
+        self.cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM order_tests ot
+            JOIN orders o ON ot.order_id = o.id
+            JOIN tests t ON ot.test_id = t.id
+            WHERE o.patient_id=?
+              AND (o.deleted IS NULL OR o.deleted=0)
+              AND (ot.deleted IS NULL OR ot.deleted=0)
+              AND o.observations LIKE ?
+              AND t.name=?
+            """,
+            (patient_id, pattern, test_name)
+        )
+        row = self.cur.fetchone()
+        return bool(row and row[0])
 
     def mark_order_emitted(self, order_id, emitted_at):
         self.cur.execute(
@@ -834,6 +907,15 @@ class LabDB:
 
     def _ensure_test_exists(self, name, category):
         self.cur.execute("SELECT id FROM tests WHERE name=?", (name,))
-        if not self.cur.fetchone():
-            self.cur.execute("INSERT INTO tests(name, category) VALUES (?,?)", (name, category))
-            self.conn.commit()
+        row = self.cur.fetchone()
+        if row:
+            if name not in self.test_map:
+                self.test_map[name] = row[0]
+            return
+        self.cur.execute("INSERT INTO tests(name, category) VALUES (?,?)", (name, category))
+        self.conn.commit()
+        if name not in self.test_map:
+            self.cur.execute("SELECT id FROM tests WHERE name=?", (name,))
+            new_row = self.cur.fetchone()
+            if new_row:
+                self.test_map[name] = new_row[0]
