@@ -1,4 +1,5 @@
 # database.py
+import datetime
 import json
 import sqlite3
 from collections import OrderedDict
@@ -210,6 +211,7 @@ class LabDB:
         self._ensure_column_exists("order_tests", "sample_status", "TEXT", default_value="recibida")
         self._ensure_column_exists("order_tests", "sample_issue", "TEXT")
         self._ensure_column_exists("order_tests", "observation", "TEXT")
+        self._ensure_column_exists("order_tests", "pending_since", "TEXT")
         self._ensure_column_exists("order_tests", "deleted", "INTEGER", default_value="0")
         self._ensure_column_exists("order_tests", "deleted_reason", "TEXT")
         self._ensure_column_exists("order_tests", "deleted_by", "INTEGER")
@@ -496,6 +498,38 @@ class LabDB:
         """)
         return self.cur.fetchall()
 
+    def count_pending_tests(self):
+        self.cur.execute("""
+            SELECT COUNT(*)
+            FROM order_tests ot
+            JOIN orders o ON ot.order_id = o.id
+            WHERE ot.sample_status='pendiente'
+              AND (ot.deleted IS NULL OR ot.deleted=0)
+              AND (o.deleted IS NULL OR o.deleted=0)
+        """)
+        row = self.cur.fetchone()
+        return row[0] if row else 0
+
+    def get_pending_tests_overview(self):
+        self.cur.execute("""
+            SELECT o.id, t.name, p.first_name, p.last_name, p.doc_type, p.doc_number,
+                   ot.pending_since, ot.sample_issue, o.sample_date, o.date
+            FROM order_tests ot
+            JOIN orders o ON ot.order_id = o.id
+            JOIN patients p ON o.patient_id = p.id
+            JOIN tests t ON ot.test_id = t.id
+            WHERE ot.sample_status='pendiente'
+              AND (ot.deleted IS NULL OR ot.deleted=0)
+              AND (o.deleted IS NULL OR o.deleted=0)
+            ORDER BY
+                CASE WHEN ot.pending_since IS NOT NULL THEN datetime(ot.pending_since)
+                     ELSE datetime(o.date)
+                END ASC,
+                o.id ASC,
+                t.name ASC
+        """)
+        return self.cur.fetchall()
+
     def get_completed_orders(self, include_emitted=False):
         if include_emitted:
             self.cur.execute("""
@@ -555,7 +589,7 @@ class LabDB:
             "emitted_at": emitted_at,
         }
         self.cur.execute("""
-            SELECT t.name, ot.result, t.category, ot.sample_status, ot.sample_issue, ot.observation, ot.id
+            SELECT t.name, ot.result, t.category, ot.sample_status, ot.sample_issue, ot.observation, ot.id, ot.pending_since
             FROM order_tests ot
             JOIN tests t ON ot.test_id = t.id
             WHERE ot.order_id = ?
@@ -578,6 +612,9 @@ class LabDB:
                 sample_status = payload.get("sample_status")
                 sample_issue = payload.get("sample_issue")
                 observation = payload.get("observation")
+                pending_since = payload.get("pending_since")
+            else:
+                pending_since = None
             if isinstance(result_value, dict):
                 stored = json.dumps(result_value, ensure_ascii=False)
             else:
@@ -588,16 +625,22 @@ class LabDB:
                 sample_issue = ""
             if observation is None:
                 observation = ""
+            if sample_status != "pendiente":
+                pending_since = None
+            else:
+                if not pending_since:
+                    pending_since = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             self.cur.execute(
                 """
                 UPDATE order_tests
                 SET result=?,
                     sample_status=?,
                     sample_issue=?,
-                    observation=?
+                    observation=?,
+                    pending_since=?
                 WHERE order_id=? AND test_id=?
                 """,
-                (stored, sample_status, sample_issue, observation, order_id, tid)
+                (stored, sample_status, sample_issue, observation, pending_since, order_id, tid)
             )
         return self._update_order_completion(order_id)
 
@@ -683,17 +726,14 @@ class LabDB:
         if not rows:
             completed_flag = 1
         else:
-            pending = 0
+            missing_results = 0
             for result, sample_status in rows:
                 status = (sample_status or "recibida").strip().lower()
-                if status == "pendiente":
-                    pending += 1
-                    continue
-                if status == "rechazada":
+                if status in {"pendiente", "rechazada"}:
                     continue
                 if result in (None, ""):
-                    pending += 1
-            completed_flag = 0 if pending else 1
+                    missing_results += 1
+            completed_flag = 0 if missing_results else 1
         self.cur.execute("UPDATE orders SET completed=? WHERE id=?", (completed_flag, order_id))
         self.conn.commit()
         return completed_flag

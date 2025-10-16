@@ -137,6 +137,17 @@ REGISTRY_ABBREVIATIONS = {
     "consistencia": "Cons"
 }
 
+LEUCOCYTE_KEYS = [
+    "segmentados",
+    "abastonados",
+    "linfocitos",
+    "monocitos",
+    "eosinofilos",
+    "basofilos",
+    "mielocitos",
+    "metamielocitos",
+]
+
 # Definiciones de plantillas de resultados estructurados por examen
 HEMOGRAM_BASE_FIELDS = [
     {
@@ -2082,6 +2093,8 @@ class MainWindow(QMainWindow):
         btn_load = QPushButton("Cargar")
         self.results_add_tests_btn = QPushButton("Agregar pruebas")
         self.results_add_tests_btn.setEnabled(False)
+        self.pending_overview_btn = QPushButton("Pendientes (0)")
+        self.pending_overview_btn.setEnabled(False)
         btn_delete_order = QPushButton("Eliminar orden")
         btn_delete_order.setStyleSheet(
             "QPushButton { background-color: #ffe8e6; color: #c0392b; border-radius: 10px; border: 1px solid #c0392b; }"
@@ -2091,6 +2104,7 @@ class MainWindow(QMainWindow):
         top_layout.addWidget(self.combo_orders)
         top_layout.addWidget(btn_load)
         top_layout.addWidget(self.results_add_tests_btn)
+        top_layout.addWidget(self.pending_overview_btn)
         top_layout.addWidget(btn_delete_order)
         layout.addLayout(top_layout)
         # Área scrollable para campos de resultados
@@ -2108,10 +2122,12 @@ class MainWindow(QMainWindow):
         btn_save.clicked.connect(self.save_results)
         btn_delete_order.clicked.connect(self.delete_order_from_results)
         self.results_add_tests_btn.clicked.connect(self.add_tests_to_selected_order)
+        self.pending_overview_btn.clicked.connect(self.show_pending_tests_overview)
         self.order_search_input.textChanged.connect(self.filter_pending_orders)
         self.pending_sort_combo.currentIndexChanged.connect(
             lambda: self.filter_pending_orders(self.order_search_input.text(), prefer_order=self.selected_order_id)
         )
+        self.update_pending_overview_button()
     def populate_pending_orders(self):
         # Llenar combo de órdenes pendientes (no completadas)
         pending = self.labdb.get_pending_orders()
@@ -2130,6 +2146,7 @@ class MainWindow(QMainWindow):
         search_text = self.order_search_input.text() if hasattr(self, 'order_search_input') else ""
         prefer_id = self.selected_order_id or self.last_order_registered
         self.filter_pending_orders(search_text, prefer_order=prefer_id)
+        self.update_pending_overview_button()
     def filter_pending_orders(self, text="", prefer_order=None):
         if not hasattr(self, 'combo_orders'):
             return
@@ -2175,6 +2192,85 @@ class MainWindow(QMainWindow):
             self._select_order_in_combo(self.combo_orders, selected)
         else:
             self.combo_orders.setCurrentIndex(0)
+
+    def update_pending_overview_button(self):
+        if not hasattr(self, 'pending_overview_btn'):
+            return
+        try:
+            count = self.labdb.count_pending_tests()
+        except Exception:
+            count = 0
+        self.pending_overview_btn.setText(f"Pendientes ({count})")
+        self.pending_overview_btn.setEnabled(count > 0)
+        tooltip = "Ver lista de exámenes marcados como pendientes." if count else "No hay exámenes pendientes registrados."
+        self.pending_overview_btn.setToolTip(tooltip)
+
+    def show_pending_tests_overview(self):
+        rows = []
+        try:
+            rows = self.labdb.get_pending_tests_overview()
+        except Exception:
+            rows = []
+        if not rows:
+            QMessageBox.information(self, "Sin pendientes", "No hay exámenes marcados como pendientes.")
+            self.update_pending_overview_button()
+            return
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Exámenes pendientes")
+        dialog.setModal(True)
+        layout = QVBoxLayout(dialog)
+        summary_label = QLabel(f"Pendientes registrados: {len(rows)}")
+        summary_label.setStyleSheet("font-weight: 600; color: #2c3e50;")
+        layout.addWidget(summary_label)
+        table = QTableWidget(len(rows), 6)
+        headers = ["Orden", "Paciente", "Documento", "Examen", "Pendiente desde", "Motivo"]
+        table.setHorizontalHeaderLabels(headers)
+        table.horizontalHeader().setStretchLastSection(True)
+        table.verticalHeader().setVisible(False)
+        table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        table.setSelectionMode(QAbstractItemView.SingleSelection)
+        for row_idx, row in enumerate(rows):
+            (
+                order_id,
+                test_name,
+                first,
+                last,
+                doc_type,
+                doc_number,
+                pending_since,
+                sample_issue,
+                sample_date,
+                order_date
+            ) = row
+            patient_name = " ".join(part for part in [(first or "").upper(), (last or "").upper()] if part).strip() or "-"
+            doc_text = " ".join(part for part in (doc_type, doc_number) if part).strip() or "-"
+            pending_display = self._format_datetime_display(pending_since, "—") if pending_since else "—"
+            if pending_display == "—" and sample_date:
+                pending_display = self._format_date_display(sample_date, "—")
+            if pending_display == "—" and order_date:
+                pending_display = self._format_datetime_display(order_date, "—")
+            motive = sample_issue.strip() if isinstance(sample_issue, str) else sample_issue or "—"
+            values = [
+                str(order_id),
+                patient_name,
+                doc_text,
+                test_name,
+                pending_display,
+                motive,
+            ]
+            for col, value in enumerate(values):
+                item = QTableWidgetItem(value)
+                if col == 0:
+                    item.setTextAlignment(Qt.AlignCenter)
+                table.setItem(row_idx, col, item)
+        table.resizeColumnsToContents()
+        layout.addWidget(table)
+        close_btn = QDialogButtonBox(QDialogButtonBox.Close)
+        close_btn.rejected.connect(dialog.reject)
+        layout.addWidget(close_btn)
+        dialog.resize(720, 360)
+        dialog.exec_()
     def _format_order_display(self, order):
         doc_type = order.get('doc_type') or ""
         doc_number = order.get('doc_number') or ""
@@ -2349,7 +2445,8 @@ class MainWindow(QMainWindow):
                 sample_status,
                 sample_issue,
                 observation,
-                _entry_id
+                _entry_id,
+                pending_since
             ) = entry
             template = None
             template_name = test_name
@@ -2394,6 +2491,9 @@ class MainWindow(QMainWindow):
             status_layout.addWidget(status_combo)
             status_layout.addWidget(issue_input, 1)
             status_layout.addWidget(btn_pending)
+            pending_since_label = QLabel()
+            pending_since_label.setStyleSheet("color: #8e44ad; font-size: 11px;")
+            status_layout.addWidget(pending_since_label)
             observation_edit = QTextEdit()
             observation_edit.setFixedHeight(40)
             observation_edit.setPlaceholderText("Observaciones de la muestra (opcional)")
@@ -2453,10 +2553,41 @@ class MainWindow(QMainWindow):
                     }
                 }
             group_layout.addRow("Obs. de la muestra:", observation_edit)
+            meta_info = {
+                "status_widget": status_combo,
+                "issue_widget": issue_input,
+                "observation_widget": observation_edit,
+                "initial_status": status_value,
+                "pending_since": pending_since,
+                "pending_label": pending_since_label,
+            }
+
+            def _refresh_pending_label():
+                current_index = status_combo.currentIndex()
+                current_value = status_combo.itemData(current_index)
+                if current_value == "pendiente":
+                    timestamp = meta_info.get("pending_since")
+                    if timestamp:
+                        display = self._format_datetime_display(timestamp, "-", include_seconds=False)
+                        pending_since_label.setText(f"Pendiente desde: {display}")
+                    else:
+                        pending_since_label.setText("Pendiente desde: se registrará al guardar")
+                    pending_since_label.setVisible(True)
+                else:
+                    pending_since_label.clear()
+                    pending_since_label.setVisible(False)
+
             def _update_issue_state(index):
                 value = status_combo.itemData(index)
                 needs_detail = value in {"pendiente", "rechazada"}
                 issue_input.setEnabled(needs_detail)
+                if value == "pendiente":
+                    if not meta_info.get("pending_since"):
+                        meta_info["pending_since"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                else:
+                    meta_info["pending_since"] = None
+                _refresh_pending_label()
+
             status_combo.currentIndexChanged.connect(_update_issue_state)
             _update_issue_state(status_combo.currentIndex())
 
@@ -2465,13 +2596,11 @@ class MainWindow(QMainWindow):
                 if pending_index >= 0:
                     status_combo.setCurrentIndex(pending_index)
                 issue_input.setFocus()
+
             btn_pending.clicked.connect(_set_pending)
 
-            self.order_fields[test_name]["meta"] = {
-                "status_widget": status_combo,
-                "issue_widget": issue_input,
-                "observation_widget": observation_edit
-            }
+            self.order_fields[test_name]["meta"] = meta_info
+            self._maybe_add_leukocyte_counter(test_name, self.order_fields[test_name], container_layout)
             self.results_layout.addWidget(group_box)
         self.results_layout.addStretch()
 
@@ -2514,6 +2643,7 @@ class MainWindow(QMainWindow):
             status_combo = meta.get("status_widget")
             issue_widget = meta.get("issue_widget")
             observation_widget = meta.get("observation_widget")
+            pending_since_value = meta.get("pending_since")
             status_value = "recibida"
             if status_combo:
                 status_data = status_combo.currentData()
@@ -2525,7 +2655,9 @@ class MainWindow(QMainWindow):
             observation_value = observation_widget.toPlainText().strip() if observation_widget else ""
             if status_value == "pendiente":
                 pending_samples += 1
-                pending_tests.append(test_name) 
+                pending_tests.append(test_name)
+            else:
+                pending_since_value = None
             if status_value == "recibida":
                 issue_value = ""
             if status_value in {"pendiente", "rechazada"} and not issue_value:
@@ -2552,7 +2684,8 @@ class MainWindow(QMainWindow):
                 "result": result_value,
                 "sample_status": status_value,
                 "sample_issue": issue_value,
-                "observation": observation_value
+                "observation": observation_value,
+                "pending_since": pending_since_value
             }
         if missing_notes:
             detalle = ", ".join(missing_notes)
@@ -2583,8 +2716,14 @@ class MainWindow(QMainWindow):
                 self.populate_pending_orders()
                 if self.selected_order_id:
                     self._select_order_in_combo(self.combo_orders, self.selected_order_id)
+        self.update_pending_overview_button()
+        base_message = "Resultados guardados. Orden marcada como completada." if completed else "Resultados guardados (orden aún incompleta)."
+        if pending_samples:
+            base_message += "\nHay muestras pendientes o rechazadas registradas."
+        if followup_order_id:
+            base_message += f"\nSe generó la orden #{followup_order_id} para el seguimiento de las pruebas pendientes."
         if completed:
-            QMessageBox.information(self, "Completado", "Resultados guardados. Orden marcada como completada.")
+            QMessageBox.information(self, "Completado", base_message)
             self.selected_order_id = None
             self.populate_pending_orders()
             self._clear_results_layout()
@@ -2594,12 +2733,7 @@ class MainWindow(QMainWindow):
             self.results_layout.addWidget(msg)
             self.results_layout.addStretch()
         else:
-            message = "Resultados guardados (orden aún incompleta)."
-            if pending_samples:
-                message += "\nHay muestras pendientes o rechazadas registradas."
-            if followup_order_id:
-                message += f"\nSe generó la orden #{followup_order_id} para el seguimiento de las pruebas pendientes."
-            QMessageBox.information(self, "Guardado", message)
+            QMessageBox.information(self, "Guardado", base_message)
             self.load_order_fields()
 
     def _clear_results_layout(self):
@@ -2702,6 +2836,54 @@ class MainWindow(QMainWindow):
         widget_info["unit"] = unit
         widget_info["reference"] = reference
         return field_def.get("label", key or ""), container, widget_info
+
+    def _maybe_add_leukocyte_counter(self, test_name, field_info, container_layout):
+        if not field_info or not container_layout:
+            return
+        template_name = field_info.get("template_name") or test_name or ""
+        if "hemograma" not in str(template_name).lower():
+            return
+        fields = field_info.get("fields", {})
+        widgets = []
+        for key in LEUCOCYTE_KEYS:
+            info = fields.get(key)
+            if not info:
+                continue
+            widget = info.get("widget")
+            if isinstance(widget, QLineEdit):
+                widgets.append(widget)
+        if not widgets:
+            return
+        counter_label = QLabel("Suma fórmula leucocitaria: —")
+        counter_label.setAlignment(Qt.AlignRight)
+        counter_label.setStyleSheet("color: #5a6b7b; font-style: italic;")
+        container_layout.addWidget(counter_label)
+
+        def _update_counter():
+            total = 0.0
+            has_value = False
+            for widget in widgets:
+                value = self._to_float(widget.text().strip()) if widget else None
+                if value is None:
+                    continue
+                has_value = True
+                total += value
+            if not has_value:
+                counter_label.setText("Suma fórmula leucocitaria: —")
+                counter_label.setStyleSheet("color: #5a6b7b; font-style: italic;")
+                return
+            total_text = f"{total:.1f}".rstrip('0').rstrip('.')
+            counter_label.setText(f"Suma fórmula leucocitaria: {total_text}%")
+            if abs(total - 100) <= 0.5:
+                counter_label.setStyleSheet("color: #1e8449; font-weight: 600;")
+            else:
+                counter_label.setStyleSheet("color: #c0392b; font-weight: 600;")
+
+        for widget in widgets:
+            widget.textChanged.connect(_update_counter)
+        _update_counter()
+        meta = field_info.setdefault("meta", {})
+        meta["leukocyte_counter_label"] = counter_label
     def _apply_auto_calculations(self, field_entries, template):
         for calc in template.get("auto_calculations", []):
             self._setup_auto_calculation(field_entries, calc)
@@ -3366,14 +3548,20 @@ class MainWindow(QMainWindow):
             return str(fua_value)
         return "Pendiente"
 
-    def _format_sample_status_text(self, status_value, note):
+    def _format_sample_status_text(self, status_value, note, pending_since=None):
         value = (status_value or "recibida").strip().lower()
         if value == "recibida":
             return ""
         label = "Pendiente" if value == "pendiente" else "Rechazada"
+        date_suffix = ""
+        if value == "pendiente" and pending_since:
+            display = self._format_datetime_display(pending_since, "")
+            if display:
+                date_suffix = f" (desde {display})"
+        base = f"{label}{date_suffix}"
         if note:
-            return f"{label} - {note}"
-        return label
+            return f"{base} - {note}"
+        return base
     def _calculate_age_years(self, patient_info, order_info):
         age_value = order_info.get('age_years') if isinstance(order_info, dict) else None
         if age_value is not None:
@@ -3838,11 +4026,11 @@ class MainWindow(QMainWindow):
         sample_display = self._format_date_display(sample_raw, "-")
         lines.append(f"FECHA DE TOMA DE MUESTRA: {sample_display}")
         lines.append("RESULTADOS:")
-        for test_name, raw_result, _, sample_status, sample_issue, observation, _ in results:
+        for test_name, raw_result, _, sample_status, sample_issue, observation, _, pending_since in results:
             formatted_lines = self._format_result_lines(test_name, raw_result, context=context)
             if formatted_lines:
                 lines.extend(formatted_lines)
-            status_text = self._format_sample_status_text(sample_status, sample_issue)
+            status_text = self._format_sample_status_text(sample_status, sample_issue, pending_since)
             if status_text:
                 lines.append(f"    Estado de muestra: {status_text}")
             if observation:
@@ -4180,7 +4368,7 @@ class MainWindow(QMainWindow):
             pdf.set_text_color(0, 0, 0)
             pdf.ln(1.2)
 
-        for test_name, raw_result, _, sample_status, sample_issue, observation, _ in results:
+        for test_name, raw_result, _, sample_status, sample_issue, observation, _, pending_since in results:
             structure = self._extract_result_structure(test_name, raw_result, context=context)
             if structure.get("type") == "structured":
                 items = structure.get("items", [])
@@ -4215,7 +4403,7 @@ class MainWindow(QMainWindow):
                 ensure_space(6)
                 pdf.set_font("Arial", '', 7)
                 pdf.multi_cell(0, 4, self._ensure_latin1(text_value))
-            status_text = self._format_sample_status_text(sample_status, sample_issue)
+            status_text = self._format_sample_status_text(sample_status, sample_issue, pending_since)
             if status_text:
                 ensure_space(5)
                 pdf.set_font("Arial", 'I', 6.6)
